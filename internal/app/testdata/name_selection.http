@@ -1,0 +1,9 @@
+@base = http://127.0.0.1:0
+
+###
+# @name good
+GET {{base}}/good
+
+###
+# @name broken
+GET {{missing}}/broken

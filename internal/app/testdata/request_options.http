@@ -1,0 +1,27 @@
+@base = http://127.0.0.1:0
+
+###
+# @name followsRedirect
+GET {{base}}/redirect
+
+###
+# @name noRedirect
+# @no-redirect
+GET {{base}}/redirect
+
+###
+# @name loginIsolated
+# @no-cookie-jar
+GET {{base}}/login
+
+###
+# @name whoamiIsolated
+GET {{base}}/whoami
+
+###
+# @name loginShared
+GET {{base}}/login
+
+###
+# @name whoamiShared
+GET {{base}}/whoami

@@ -1,0 +1,40 @@
+# Run with:
+#   httprun run --env dev examples/all_methods.http
+@payload = payload.json
+
+###
+# @name listItems
+GET {{base}}/get?page=1
+Accept: application/json
+X-Secret: {{privateOnly}}
+
+###
+# @name createItem
+POST {{base}}/post
+Content-Type: application/json
+X-Token: {{token}}
+
+< {{payload}}
+
+###
+# @name replaceItem
+PUT {{base}}/put
+Content-Type: application/json
+
+{"op":"replace","value":"{{itemValue}}"}
+
+###
+# @name patchItem
+PATCH {{base}}/patch
+Content-Type: application/json
+
+{"op":"patch"}
+
+###
+# @name deleteItem
+DELETE {{base}}/delete
+X-Delete-Reason: cleanup
+
+###
+# @name headHealth
+HEAD {{base}}/status/200

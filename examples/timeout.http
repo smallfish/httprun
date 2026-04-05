@@ -1,0 +1,10 @@
+@base = https://httpbin.org
+
+# Run with:
+#   httprun run examples/timeout.http
+# This example is expected to fail with a timeout.
+
+###
+# @name slowRequest
+# @timeout 50 ms
+GET {{base}}/delay/1

@@ -1,0 +1,30 @@
+@base = https://httpbin.org
+
+# Run with:
+#   httprun run examples/request_options.http
+
+###
+# @name followsRedirect
+GET {{base}}/redirect-to?url=/get
+
+###
+# @name noRedirect
+# @no-redirect
+GET {{base}}/redirect-to?url=/get
+
+###
+# @name loginIsolated
+# @no-cookie-jar
+GET {{base}}/cookies/set?session=isolated
+
+###
+# @name whoamiIsolated
+GET {{base}}/cookies
+
+###
+# @name loginShared
+GET {{base}}/cookies/set?session=shared
+
+###
+# @name whoamiShared
+GET {{base}}/cookies

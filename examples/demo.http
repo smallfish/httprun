@@ -1,0 +1,17 @@
+@base = https://httpbin.org
+
+###
+# @name ping
+GET {{base}}/get
+Accept: application/json
+
+###
+# @name createAnything
+POST {{base}}/anything
+Content-Type: application/json
+X-Request-Id: {{$uuid}}
+
+{
+  "createdAt": "{{$timestamp}}",
+  "source": "httprun"
+}

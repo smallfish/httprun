@@ -1,0 +1,6 @@
+@base = http://127.0.0.1:0
+
+###
+# @name slowRequest
+# @timeout 50 ms
+GET {{base}}/slow

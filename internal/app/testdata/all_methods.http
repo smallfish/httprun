@@ -1,0 +1,40 @@
+@base = http://127.0.0.1:0
+@resource = items
+@payload = payload.json
+
+###
+# @name listItems
+GET {{base}}/{{resource}}?page=1
+Accept: application/json
+X-Secret: {{privateOnly}}
+
+###
+# @name createItem
+POST {{base}}/{{resource}}
+Content-Type: application/json
+X-Token: {{token}}
+
+< {{payload}}
+
+###
+# @name replaceItem
+PUT {{base}}/{{resource}}/42
+Content-Type: application/json
+
+{"op":"replace","value":"{{itemValue}}"}
+
+###
+# @name patchItem
+PATCH {{base}}/{{resource}}/42
+Content-Type: application/json
+
+{"op":"patch"}
+
+###
+# @name deleteItem
+DELETE {{base}}/{{resource}}/42
+X-Delete-Reason: cleanup
+
+###
+# @name headHealth
+HEAD {{base}}/health
