@@ -73,10 +73,16 @@ func TestRealMainRunSupportsMultipleFilesAndJobs(t *testing.T) {
 	if maxActive != 2 {
 		t.Fatalf("expected concurrent execution across files, maxActive=%d", maxActive)
 	}
-	if strings.Index(output, "==> first") == -1 || strings.Index(output, "==> second") == -1 {
+	if strings.Index(output, "== "+first+" ==") == -1 || strings.Index(output, "== "+second+" ==") == -1 {
+		t.Fatalf("expected file headings, got %q", output)
+	}
+	if strings.Index(output, "1. first") == -1 || strings.Index(output, "1. second") == -1 {
 		t.Fatalf("expected both request outputs, got %q", output)
 	}
-	if strings.Index(output, "==> first") > strings.Index(output, "==> second") {
+	if strings.Count(output, "Summary: 1 requests, 1 passed") != 2 {
+		t.Fatalf("expected per-file summaries, got %q", output)
+	}
+	if strings.Index(output, "== "+first+" ==") > strings.Index(output, "== "+second+" ==") {
 		t.Fatalf("expected outputs to preserve input order, got %q", output)
 	}
 }
@@ -122,6 +128,74 @@ func TestRealMainRejectsInvalidJobs(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "--jobs must be greater than 0") {
 		t.Fatalf("unexpected stderr %q", stderr.String())
+	}
+}
+
+func TestRealMainRunSummarizesHTTPFailuresWithoutFailingByDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"bad request"}`))
+	}))
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	path := writeHTTPFile(t, tempDir, "bad.http", "# @name bad\nGET {{base}}/bad\n")
+
+	var stdout, stderr bytes.Buffer
+	code := realMain([]string{
+		"run",
+		"--var", "base=" + server.URL,
+		path,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d, stderr=%q", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "400 Bad Request") {
+		t.Fatalf("expected HTTP error status in output, got %q", output)
+	}
+	if !strings.Contains(output, "Summary: 1 requests, 0 passed, 1 failed") {
+		t.Fatalf("expected failed summary, got %q", output)
+	}
+}
+
+func TestRealMainRunFailHTTPDoesNotRepeatHTTPErrorOnStderr(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"bad request"}`))
+	}))
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	path := writeHTTPFile(t, tempDir, "bad.http", "# @name bad\nGET {{base}}/bad\n")
+
+	var stdout, stderr bytes.Buffer
+	code := realMain([]string{
+		"run",
+		"--fail-http",
+		"--var", "base=" + server.URL,
+		path,
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr for HTTP failure, got %q", stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "400 Bad Request") {
+		t.Fatalf("expected HTTP error status in output, got %q", output)
+	}
+	if !strings.Contains(output, "Summary: 1 requests, 0 passed, 1 failed") {
+		t.Fatalf("expected failed summary, got %q", output)
 	}
 }
 

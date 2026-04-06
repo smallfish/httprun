@@ -21,6 +21,7 @@ type Result struct {
 	Request  resolver.ResolvedRequest
 	Response *http.Response
 	Body     []byte
+	Duration time.Duration
 }
 
 type Session struct {
@@ -54,6 +55,7 @@ func (s *Session) Execute(ctx context.Context, request resolver.ResolvedRequest)
 	}
 	httpRequest.Header = request.Headers.Clone()
 
+	start := time.Now()
 	response, err := client.Do(httpRequest)
 	if err != nil {
 		return Result{}, err
@@ -69,6 +71,7 @@ func (s *Session) Execute(ctx context.Context, request resolver.ResolvedRequest)
 		Request:  request,
 		Response: response,
 		Body:     body,
+		Duration: time.Since(start),
 	}, nil
 }
 

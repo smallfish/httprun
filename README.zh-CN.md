@@ -89,7 +89,7 @@ httprun run --env dev --var base=https://example.com path/to/demo.http
 - `--var key=value`：覆盖变量，可重复传入
 - `--jobs <n>`：文件级并发数，默认 `1`
 - `--timeout <duration>`：`run` 的默认请求超时，默认 `30s`
-- `--verbose`：打印展开后的请求和响应头
+- `--verbose`：打印完整的请求与响应细节，包括头和 body
 - `--fail-http`：当任一响应状态码 `>= 400` 时返回非零退出码
 
 ### `validate`
@@ -319,6 +319,9 @@ go run ./cmd/httprun run --name ping examples/demo.http
 
 ## 输出和退出码
 
+`run` 默认输出为紧凑摘要格式，会展示请求序号、状态码、耗时和响应体大小。
+使用 `--verbose` 可以查看完整的请求与响应细节，包括头和 body。
+
 - `run` 在所有目标文件都成功执行时返回 `0`
 - `run` 只要任一文件失败就返回 `1`
 - `validate` 在所有文件都校验通过时返回 `0`
@@ -332,19 +335,19 @@ go run ./cmd/httprun run --name ping examples/demo.http
 本地构建：
 
 ```bash
-go build ./cmd/httprun
+make build
 ```
 
 或者直接运行：
 
 ```bash
-go run ./cmd/httprun --help
+make run-help
 ```
 
 运行测试：
 
 ```bash
-go test ./...
+make test
 ```
 
 当前测试覆盖：

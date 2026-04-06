@@ -144,3 +144,50 @@ func TestParseInlineDirectiveRequestLine(t *testing.T) {
 		t.Fatalf("expected no redirect directive")
 	}
 }
+
+func TestParseSegmentSeparatorWithComment(t *testing.T) {
+	input := `
+### first request
+GET https://example.com/first
+
+### second request
+POST https://example.com/second
+Content-Type: application/json
+
+{"name":"demo"}
+`
+
+	doc, err := Parse("demo.http", input)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if len(doc.Requests) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(doc.Requests))
+	}
+	if got := doc.Requests[0].Method; got != "GET" {
+		t.Fatalf("expected GET, got %q", got)
+	}
+	if got := doc.Requests[1].Method; got != "POST" {
+		t.Fatalf("expected POST, got %q", got)
+	}
+}
+
+func TestParseSegmentSeparatorWithoutWhitespaceIsNotSplit(t *testing.T) {
+	input := `
+###first request
+GET https://example.com/first
+`
+
+	doc, err := Parse("demo.http", input)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if len(doc.Requests) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(doc.Requests))
+	}
+	if got := doc.Requests[0].Method; got != "GET" {
+		t.Fatalf("expected GET, got %q", got)
+	}
+}

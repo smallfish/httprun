@@ -50,7 +50,7 @@ func TestRunExecutesAllCommonRequests(t *testing.T) {
 	httpPath := filepath.Join(testdataDir, "all_methods.http")
 
 	var stdout bytes.Buffer
-	err := Run(context.Background(), &stdout, RunOptions{
+	_, err := Run(context.Background(), &stdout, RunOptions{
 		Path:            httpPath,
 		EnvironmentName: "dev",
 		CLIOverrides: map[string]string{
@@ -86,7 +86,7 @@ func TestRunExecutesAllCommonRequests(t *testing.T) {
 	assertRequest(t, captured[5], http.MethodHead, "/health", "", "", nil)
 
 	output := stdout.String()
-	if strings.Count(output, "<==") != 6 {
+	if strings.Count(output, "200 OK") != 5 || strings.Count(output, "204 No Content") != 1 {
 		t.Fatalf("expected 6 responses in output, got %q", output)
 	}
 }
@@ -137,7 +137,7 @@ func TestRunRequestOptions(t *testing.T) {
 	httpPath := filepath.Join("testdata", "request_options.http")
 
 	var redirectOut bytes.Buffer
-	if err := Run(context.Background(), &redirectOut, RunOptions{
+	if _, err := Run(context.Background(), &redirectOut, RunOptions{
 		Path:        httpPath,
 		RequestName: "followsRedirect",
 		CLIOverrides: map[string]string{
@@ -147,12 +147,12 @@ func TestRunRequestOptions(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Run() followsRedirect error = %v", err)
 	}
-	if !strings.Contains(redirectOut.String(), "<== 200 OK") {
+	if !strings.Contains(redirectOut.String(), "200 OK") {
 		t.Fatalf("expected redirect follow to end in 200, got %q", redirectOut.String())
 	}
 
 	var noRedirectOut bytes.Buffer
-	if err := Run(context.Background(), &noRedirectOut, RunOptions{
+	if _, err := Run(context.Background(), &noRedirectOut, RunOptions{
 		Path:        httpPath,
 		RequestName: "noRedirect",
 		CLIOverrides: map[string]string{
@@ -162,17 +162,18 @@ func TestRunRequestOptions(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Run() noRedirect error = %v", err)
 	}
-	if !strings.Contains(noRedirectOut.String(), "<== 302 Found") {
+	if !strings.Contains(noRedirectOut.String(), "302 Found") {
 		t.Fatalf("expected no-redirect request to return 302, got %q", noRedirectOut.String())
 	}
 
 	var cookieOut bytes.Buffer
-	if err := Run(context.Background(), &cookieOut, RunOptions{
+	if _, err := Run(context.Background(), &cookieOut, RunOptions{
 		Path: httpPath,
 		CLIOverrides: map[string]string{
 			"base": server.URL,
 		},
 		Timeout: 5 * time.Second,
+		Verbose: true,
 	}); err != nil {
 		t.Fatalf("Run() cookie flow error = %v", err)
 	}
@@ -196,7 +197,7 @@ func TestRunRequestTimeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := Run(context.Background(), &bytes.Buffer{}, RunOptions{
+	_, err := Run(context.Background(), &bytes.Buffer{}, RunOptions{
 		Path:        filepath.Join("testdata", "timeout.http"),
 		RequestName: "slowRequest",
 		CLIOverrides: map[string]string{
@@ -224,7 +225,7 @@ func TestRunNameSelectsOnlyTargetRequest(t *testing.T) {
 
 	httpPath := filepath.Join("testdata", "name_selection.http")
 
-	if err := Run(context.Background(), &bytes.Buffer{}, RunOptions{
+	if _, err := Run(context.Background(), &bytes.Buffer{}, RunOptions{
 		Path:        httpPath,
 		RequestName: "good",
 		CLIOverrides: map[string]string{
@@ -251,7 +252,7 @@ func TestRunNameSelectsOnlyTargetRequest(t *testing.T) {
 }
 
 func TestRunNameMissingRequest(t *testing.T) {
-	err := Run(context.Background(), &bytes.Buffer{}, RunOptions{
+	_, err := Run(context.Background(), &bytes.Buffer{}, RunOptions{
 		Path:        filepath.Join("testdata", "name_selection.http"),
 		RequestName: "doesNotExist",
 		CLIOverrides: map[string]string{

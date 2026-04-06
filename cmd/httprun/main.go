@@ -48,7 +48,7 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 	envName := fs.String("env", "", "environment name from http-client.env.json")
 	jobs := fs.Int("jobs", 1, "number of files to process concurrently")
 	timeout := fs.Duration("timeout", 30*time.Second, "request timeout")
-	verbose := fs.Bool("verbose", false, "print expanded request and response headers")
+	verbose := fs.Bool("verbose", false, "print expanded request and response details")
 	failHTTP := fs.Bool("fail-http", false, "return non-zero on HTTP status >= 400")
 	fs.Var(vars, "var", "override variable (key=value), may be repeated")
 
@@ -66,7 +66,7 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 
 	results := executeInParallel(fs.Args(), *jobs, func(path string) commandResult {
 		var buffer bytes.Buffer
-		err := app.Run(context.Background(), &buffer, app.RunOptions{
+		stats, err := app.Run(context.Background(), &buffer, app.RunOptions{
 			Path:            path,
 			RequestName:     *name,
 			EnvironmentName: *envName,
@@ -78,14 +78,23 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 		return commandResult{
 			path:   path,
 			output: buffer.String(),
+			stats:  stats,
 			err:    err,
 		}
 	})
 
 	exitCode := 0
+	multiFile := len(results) > 1
 	for _, result := range results {
+		if multiFile && (result.output != "" || shouldPrintSummary(result)) {
+			fmt.Fprintf(stdout, "== %s ==\n\n", result.path)
+		}
 		if result.output != "" {
 			_, _ = io.WriteString(stdout, result.output)
+		}
+		if summary := formatRunSummary(result); summary != "" {
+			fmt.Fprintln(stdout, summary)
+			fmt.Fprintln(stdout)
 		}
 		if result.err == nil {
 			continue
@@ -93,11 +102,11 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 
 		var httpErr app.HTTPStatusError
 		if errors.As(result.err, &httpErr) {
-			fmt.Fprintln(stderr, result.err)
+			exitCode = 1
 		} else {
 			fmt.Fprintln(stderr, result.err)
+			exitCode = 1
 		}
-		exitCode = 1
 	}
 	return exitCode
 }
@@ -160,7 +169,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  --var key=value     Override a variable, may be repeated")
 	fmt.Fprintln(w, "  --jobs <n>          Process files concurrently")
 	fmt.Fprintln(w, "  --timeout 30s       Request timeout for run")
-	fmt.Fprintln(w, "  --verbose           Print expanded request and response headers")
+	fmt.Fprintln(w, "  --verbose           Print expanded request and response details")
 	fmt.Fprintln(w, "  --fail-http         Return non-zero on HTTP status >= 400")
 }
 
@@ -210,7 +219,29 @@ func splitKeyValue(input string) []string {
 type commandResult struct {
 	path   string
 	output string
+	stats  app.RunStats
 	err    error
+}
+
+func shouldPrintSummary(result commandResult) bool {
+	return result.stats.Selected > 0 && (result.stats.Executed > 0 || result.err == nil)
+}
+
+func formatRunSummary(result commandResult) string {
+	if !shouldPrintSummary(result) {
+		return ""
+	}
+
+	stats := result.stats
+	skipped := stats.Selected - stats.Executed
+	switch {
+	case skipped == 0 && stats.Failed == 0:
+		return fmt.Sprintf("Summary: %d requests, %d passed", stats.Selected, stats.Passed)
+	case skipped == 0:
+		return fmt.Sprintf("Summary: %d requests, %d passed, %d failed", stats.Selected, stats.Passed, stats.Failed)
+	default:
+		return fmt.Sprintf("Summary: %d/%d executed, %d passed, %d failed, %d skipped", stats.Executed, stats.Selected, stats.Passed, stats.Failed, skipped)
+	}
 }
 
 func executeInParallel(paths []string, jobs int, fn func(path string) commandResult) []commandResult {

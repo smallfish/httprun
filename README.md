@@ -89,7 +89,7 @@ Flags:
 - `--var key=value`: override variables, can be repeated
 - `--jobs <n>`: process files concurrently, default `1`
 - `--timeout <duration>`: default request timeout for `run`, default `30s`
-- `--verbose`: print expanded request and response headers
+- `--verbose`: print expanded request and response details, including headers and bodies
 - `--fail-http`: return non-zero if any response status is `>= 400`
 
 ### `validate`
@@ -319,6 +319,9 @@ Additional example files in [`examples/`](./examples):
 
 ## Output and Exit Codes
 
+Default `run` output is a compact per-request summary with request numbering, status, duration, and response size.
+Use `--verbose` to print full request and response details, including headers and bodies.
+
 - `run` returns `0` when all selected files complete successfully
 - `run` returns `1` if any file fails
 - `validate` returns `0` when all files validate successfully
@@ -332,19 +335,19 @@ With `--fail-http`, HTTP responses with status `>= 400` are treated as command f
 Build locally:
 
 ```bash
-go build ./cmd/httprun
+make build
 ```
 
 Or run directly:
 
 ```bash
-go run ./cmd/httprun --help
+make run-help
 ```
 
 Run tests:
 
 ```bash
-go test ./...
+make test
 ```
 
 Current tests cover:

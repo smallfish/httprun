@@ -61,7 +61,7 @@ func splitSegments(lines []string) [][]parseLine {
 	current := make([]parseLine, 0)
 
 	for idx, line := range lines {
-		if strings.TrimSpace(line) == "###" {
+		if isSegmentSeparator(line) {
 			if len(current) > 0 {
 				segments = append(segments, current)
 				current = make([]parseLine, 0)
@@ -76,6 +76,20 @@ func splitSegments(lines []string) [][]parseLine {
 	}
 
 	return segments
+}
+
+func isSegmentSeparator(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "###" {
+		return true
+	}
+	if !strings.HasPrefix(trimmed, "###") {
+		return false
+	}
+	if len(trimmed) == 3 {
+		return true
+	}
+	return trimmed[3] == ' ' || trimmed[3] == '\t'
 }
 
 func parseSegment(lines []parseLine) ([]ast.VariableDecl, *ast.RequestBlock, error) {

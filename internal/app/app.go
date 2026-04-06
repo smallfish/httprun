@@ -34,6 +34,13 @@ type ValidateOptions struct {
 	CLIOverrides    map[string]string
 }
 
+type RunStats struct {
+	Selected int
+	Executed int
+	Passed   int
+	Failed   int
+}
+
 type HTTPStatusError struct {
 	RequestName string
 	StatusCode  int
@@ -47,43 +54,53 @@ func (e HTTPStatusError) Error() string {
 	return fmt.Sprintf("request failed with %s", e.Status)
 }
 
-func Run(ctx context.Context, stdout io.Writer, options RunOptions) error {
+func Run(ctx context.Context, stdout io.Writer, options RunOptions) (RunStats, error) {
 	doc, variables, err := load(options.Path, options.EnvironmentName, options.CLIOverrides)
 	if err != nil {
-		return err
+		return RunStats{}, err
 	}
 
 	if err := validate.Document(doc, options.RequestName, variables); err != nil {
-		return qualifyPath(doc.Path, err)
+		return RunStats{}, qualifyPath(doc.Path, err)
 	}
 
 	requests, err := validate.SelectRequests(doc.Requests, options.RequestName)
 	if err != nil {
-		return qualifyPath(doc.Path, err)
+		return RunStats{}, qualifyPath(doc.Path, err)
 	}
+	stats := RunStats{Selected: len(requests)}
 
 	execConfig := executor.Config{Timeout: options.Timeout}
 	session, err := executor.NewSession(execConfig)
 	if err != nil {
-		return err
+		return stats, err
 	}
 	resolveOptions := resolver.ResolveOptions{BaseDir: filepath.Dir(doc.Path)}
-	for _, request := range requests {
+	for idx, request := range requests {
 		resolved, err := resolver.ResolveRequest(request, variables, resolveOptions)
 		if err != nil {
-			return qualifyPath(doc.Path, err)
+			return stats, qualifyPath(doc.Path, err)
 		}
 
 		result, err := session.Execute(ctx, resolved)
 		if err != nil {
-			return qualifyPath(doc.Path, fmt.Errorf("line %d: %w", request.Pos.Line, err))
+			stats.Executed++
+			stats.Failed++
+			return stats, qualifyPath(doc.Path, fmt.Errorf("line %d: %w", request.Pos.Line, err))
 		}
-		if err := output.WriteResult(stdout, result, options.Verbose); err != nil {
-			return err
+		stats.Executed++
+		if err := output.WriteResult(stdout, idx+1, result, options.Verbose); err != nil {
+			return stats, err
+		}
+
+		if result.Response.StatusCode >= http.StatusBadRequest {
+			stats.Failed++
+		} else {
+			stats.Passed++
 		}
 
 		if options.FailOnHTTPError && result.Response.StatusCode >= http.StatusBadRequest {
-			return HTTPStatusError{
+			return stats, HTTPStatusError{
 				RequestName: request.Name,
 				StatusCode:  result.Response.StatusCode,
 				Status:      result.Response.Status,
@@ -91,7 +108,7 @@ func Run(ctx context.Context, stdout io.Writer, options RunOptions) error {
 		}
 	}
 
-	return nil
+	return stats, nil
 }
 
 func Validate(options ValidateOptions) error {
