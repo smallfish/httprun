@@ -2,24 +2,24 @@
 
 中文文档：[`README.zh-CN.md`](./README.zh-CN.md)
 
-`httprun` is a Go CLI for running `.http` files. It intentionally supports a focused subset of the JetBrains `.http` format for common HTTP request workflows. It does not aim to be fully compatible with `ijhttp` or IDE scripting features.
+## NAME
 
-## At A Glance
+`httprun` - command-line tool for running `.http` files
 
-| Area | Support |
-| --- | --- |
-| Commands | `run`, `validate` |
-| File execution | Multiple `.http` files per command, file-level concurrency via `--jobs` |
-| Request layout | `###` request separators, `# @name` named requests |
-| Methods | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD` |
-| Variables | File variables, env files, CLI `--var`, built-ins `{{$uuid}}` / `{{$timestamp}}` |
-| Request content | URL, headers, inline body, external body file via `< path` |
-| Request options | `@timeout`, `@connection-timeout`, `@no-redirect`, `@no-cookie-jar` |
-| Assertions | `# @assert <expression>` with `status`, `body`, `json.<path>`, `header.<name>` |
-| Output model | Compact summary by default, `--verbose` for expanded request/response details |
-| Execution model | Sequential inside one file, concurrent across files, cookie jar shared within a file |
+## SYNOPSIS
 
-## Quick Start
+```text
+httprun run [flags] <file.http> [more.http ...]
+httprun validate [flags] <file.http> [more.http ...]
+```
+
+## DESCRIPTION
+
+`httprun` runs JetBrains-style `.http` files and supports the subset of syntax most commonly used in practice.
+
+It is meant for keeping HTTP requests, variable substitution, and simple assertions in files and running them from the command line. It is not a full replacement for `ijhttp`, and it does not support IDE scripting features.
+
+## QUICK START
 
 Install:
 
@@ -48,15 +48,13 @@ httprun run --name ping demo.http
 httprun validate demo.http
 ```
 
-## Common Commands
+Notes:
 
-Top-level usage:
+- `run` sends real HTTP requests.
+- `validate` checks whether the file can be parsed correctly, but does not send requests.
+- On success, the default output shows status, duration, and response size for each request.
 
-```text
-Usage:
-  httprun run [flags] <file.http> [more.http ...]
-  httprun validate [flags] <file.http> [more.http ...]
-```
+## COMMANDS
 
 ### `run`
 
@@ -72,16 +70,16 @@ httprun run --env dev --var base=https://example.com path/to/demo.http
 | Flag | Meaning |
 | --- | --- |
 | `--name <request>` | Execute only the named request |
-| `--env <env>` | Load variables from `http-client.env.json` and `http-client.private.env.json` |
+| `--env <env>` | Read variables from `http-client.env.json` and `http-client.private.env.json` |
 | `--var key=value` | Override variables, repeatable |
-| `--jobs <n>` | Number of files to process concurrently, default `1` |
+| `--jobs <n>` | Number of `.http` files to run at the same time, default `1` |
 | `--timeout <duration>` | Default request timeout, default `30s` |
-| `--verbose` | Print expanded request and response details |
-| `--fail-http` | Return non-zero on HTTP status `>= 400` |
+| `--verbose` | Print full request and response details |
+| `--fail-http` | Return non-zero when HTTP status is `>= 400` |
 
 ### `validate`
 
-Validate one or more `.http` files without sending requests.
+Check whether one or more `.http` files are valid, without sending real requests.
 
 ```bash
 httprun validate examples/demo.http
@@ -92,7 +90,9 @@ httprun validate --name ping --env dev path/to/demo.http
 
 Supported flags: `--name`, `--env`, `--var`, `--jobs`.
 
-## Most Common Patterns
+## HTTP FILE FORMAT
+
+This section shows the most common `.http` file patterns.
 
 ### Multiple requests
 
@@ -107,6 +107,8 @@ Content-Type: application/json
 {"name":"demo"}
 ```
 
+Use `###` to separate requests. A single file can contain multiple requests.
+
 ### Named requests
 
 ```http
@@ -118,7 +120,7 @@ Content-Type: application/json
 {"user":"demo","pass":"secret"}
 ```
 
-Run one named request:
+Run only that request:
 
 ```bash
 httprun run --name login demo.http
@@ -138,12 +140,108 @@ Authorization: Bearer {{token}}
 Notes:
 
 - File variables use `@key = value`.
-- Request metadata such as `# @name`, `# @assert`, and `# @timeout` is recognized only in comment directives, not in variable declarations.
-- `@name = foo` is still a normal variable declaration, but reusing directive-like names is not recommended because it makes files harder to read.
+- Variable references use `{{key}}`.
+- Directive comments such as `# @name`, `# @assert`, and `# @timeout` are different from variable declarations such as `@base = ...`.
+- `@name = foo` is still treated as a normal variable, but that style is not recommended because it makes the file harder to read.
 
-### Environment files
+### Built-in variables
 
-`httprun` looks in the same directory as the `.http` file for:
+Currently supported:
+
+- `{{$uuid}}`
+- `{{$timestamp}}`
+
+```http
+POST https://example.com/events
+X-Request-Id: {{$uuid}}
+
+{"createdAt":"{{$timestamp}}"}
+```
+
+### External request body files
+
+```http
+@payload = payload.json
+
+###
+POST https://example.com/items
+Content-Type: application/json
+
+< {{payload}}
+```
+
+Notes:
+
+- `< path` means "load the request body from a file".
+- The path is resolved relative to the `.http` file directory.
+- Variable interpolation also applies to the loaded file content.
+
+### Placement rules
+
+- File variables, request names, request directives, and assertions must appear before the request line.
+- Headers go after the request line and before the first blank line.
+- The request body starts after the first blank line.
+- Anything written after the request body is still treated as body content, not as a new directive.
+
+## REQUEST DIRECTIVES
+
+Request directives are comment lines placed before the request line.
+
+```http
+###
+# @timeout 50s
+# @connection-timeout 2s
+# @no-redirect
+GET {{base}}/slow
+```
+
+Some directives can also share the same line as the request:
+
+```http
+###
+# @no-redirect GET {{base}}/redirect
+```
+
+| Directive | Meaning |
+| --- | --- |
+| `# @timeout 50s` | Override the timeout for the current request |
+| `# @connection-timeout 2s` | Override the connection timeout for the current request |
+| `# @no-redirect` | Do not follow redirects automatically |
+| `# @no-cookie-jar` | Do not write cookies from this response back into the shared cookie store |
+
+## ASSERTIONS
+
+Assertions also appear before the request line.
+
+```http
+###
+# @assert status == 200
+# @assert body contains hello
+# @assert json.data.user.name == "demo"
+# @assert header.Content-Type contains "application/json"
+GET {{base}}/profile
+```
+
+### Supported checks
+
+| What to check | Operators | Example |
+| --- | --- | --- |
+| `status` | `==`, `!=`, `>`, `>=`, `<`, `<=` | `# @assert status == 200` |
+| `body` | `==`, `!=`, `contains`, `not_contains`, `exists`, `not_exists` | `# @assert body contains hello` |
+| `json.<path>` | `==`, `!=`, `>`, `>=`, `<`, `<=`, `exists`, `not_exists` | `# @assert json.data.count >= 2` |
+| `header.<name>` | `==`, `!=`, `contains`, `not_contains`, `exists`, `not_exists` | `# @assert header.X-Trace-Id exists` |
+
+### Assertion rules
+
+- `@assert` must appear before the request line.
+- If you place `@assert` after the body, it is treated as body content.
+- `json.<path>` uses dot notation, with numeric segments for array indexes, for example `json.data.items.0.id`.
+- JSON comparison values must be valid JSON. Strings must be quoted, booleans must be `true` or `false`, and numbers must use JSON number syntax.
+- If any assertion fails, execution of the current file stops immediately and later requests in that file are skipped.
+
+## FILES
+
+`httprun` looks for these files in the same directory as the `.http` file:
 
 - `http-client.env.json`
 - `http-client.private.env.json`
@@ -165,7 +263,7 @@ Use them with:
 httprun run --env dev path/to/demo.http
 ```
 
-Variable precedence:
+Variable precedence from highest to lowest:
 
 1. CLI `--var`
 2. `http-client.env.json`
@@ -173,113 +271,33 @@ Variable precedence:
 4. File variables such as `@base = ...`
 5. Built-in variables
 
-### Built-in variables
-
-Supported built-ins:
-
-- `{{$uuid}}`
-- `{{$timestamp}}`
-
-```http
-POST https://example.com/events
-X-Request-Id: {{$uuid}}
-
-{"createdAt":"{{$timestamp}}"}
-```
-
-### External body files
-
-```http
-@payload = payload.json
-
-###
-POST https://example.com/items
-Content-Type: application/json
-
-< {{payload}}
-```
-
-The body file path is resolved relative to the `.http` file directory. Variable interpolation also applies inside the loaded file content.
-
-### Placement rules
-
-- File variables, request names, request directives, and assertions all belong before the request line.
-- Headers belong after the request line and before the first blank line.
-- The request body starts after the first blank line.
-- Anything written after the body is treated as body content, not as request metadata.
-
-## Request Directives
-
-Directives are comment lines before the request line.
-
-```http
-###
-# @timeout 50s
-# @connection-timeout 2s
-# @no-redirect
-GET {{base}}/slow
-```
-
-Inline form is supported for request-line directives:
-
-```http
-###
-# @no-redirect GET {{base}}/redirect
-```
-
-| Directive | Meaning |
-| --- | --- |
-| `# @timeout 50s` | Override request timeout |
-| `# @connection-timeout 2s` | Override connection timeout |
-| `# @no-redirect` | Do not follow redirects |
-| `# @no-cookie-jar` | Do not write response cookies into the shared jar |
-
-## Assertions
-
-Assertions are comment directives before the request line.
-
-```http
-###
-# @assert status == 200
-# @assert body contains hello
-# @assert json.data.user.name == "demo"
-# @assert header.Content-Type contains "application/json"
-GET {{base}}/profile
-```
-
-### Supported Subjects And Operators
-
-| Subject | Operators | Example |
-| --- | --- | --- |
-| `status` | `==`, `!=`, `>`, `>=`, `<`, `<=` | `# @assert status == 200` |
-| `body` | `==`, `!=`, `contains`, `not_contains`, `exists`, `not_exists` | `# @assert body contains hello` |
-| `json.<path>` | `==`, `!=`, `>`, `>=`, `<`, `<=`, `exists`, `not_exists` | `# @assert json.data.count >= 2` |
-| `header.<name>` | `==`, `!=`, `contains`, `not_contains`, `exists`, `not_exists` | `# @assert header.X-Trace-Id exists` |
-
-### Assertion Notes
-
-- `@assert` must appear before the request line. If you write it after the body, it is treated as body content rather than an assertion.
-- `json.<path>` uses dot-path syntax. Arrays use numeric segments such as `json.data.items.0.id`.
-- JSON comparison values must be valid JSON. Strings must be quoted, booleans use `true` / `false`, and numbers use JSON number syntax.
-- If any assertion fails, execution of the current file stops immediately. Remaining requests in that file are skipped.
-
-## Execution Model
+## EXECUTION RULES
 
 - Requests inside one `.http` file run sequentially.
-- Files in one command can run concurrently with `--jobs`.
-- Output is printed in input file order even when files run concurrently.
-- Cookie jar is shared within one file execution.
-- Cookie jar is not shared across different files.
+- Multiple files in one command can run concurrently with `--jobs`.
+- Output is still printed in input order even when files run concurrently.
+- Requests in the same file share cookies.
+- Cookies are not shared across different files.
 
-## Examples
+## EXIT STATUS
+
+- `run` returns `0` when all selected files complete successfully.
+- `run` returns `1` if any file fails.
+- `validate` returns `0` when all files validate successfully.
+- `validate` returns `1` if any file fails validation.
+- Invalid CLI usage returns `2`.
+- Assertion failures always return `1`.
+- With `--fail-http`, HTTP status `>= 400` is treated as command failure.
+
+## EXAMPLES
 
 Primary example:
 
-- [`examples/demo.http`](./examples/demo.http): minimal end-to-end example
+- [`examples/demo.http`](./examples/demo.http): minimal runnable example
 
 Additional examples:
 
-- [`examples/all_methods.http`](./examples/all_methods.http): common HTTP methods, variables, env files, external body files
+- [`examples/all_methods.http`](./examples/all_methods.http): common HTTP methods, variables, environment files, external request body files
 - [`examples/assertions.http`](./examples/assertions.http): successful assertions across `status`, `body`, `json.*`, `header.*`, and multiple operators
 - [`examples/assertions_failure.http`](./examples/assertions_failure.http): intentional assertion failure, non-zero exit, and skipped follow-up requests
 - [`examples/request_options.http`](./examples/request_options.http): `@no-redirect` and `@no-cookie-jar`
@@ -294,19 +312,9 @@ go run ./cmd/httprun run examples/assertions.http
 go run ./cmd/httprun run examples/assertions_failure.http
 ```
 
-## Output And Exit Codes
+## LIMITATIONS
 
-- Default `run` output is a compact per-request summary with request numbering, status, duration, and response size.
-- `--verbose` prints full request and response details, including headers and bodies.
-- `run` returns `0` when all selected files complete successfully.
-- `run` returns `1` if any file fails.
-- `validate` returns `0` when all files validate successfully.
-- `validate` returns `1` if any file fails validation.
-- Invalid CLI usage returns `2`.
-- Assertion failures always return `1`.
-- With `--fail-http`, HTTP status `>= 400` is treated as command failure.
-
-## Not Supported
+`httprun` is better suited to straightforward request files with variable substitution and assertions than to script-heavy workflows. The following are not supported:
 
 - Pre-request scripts
 - Response handler scripts
@@ -316,10 +324,10 @@ go run ./cmd/httprun run examples/assertions_failure.http
 - GraphQL-specific syntax
 - gRPC
 - OAuth and advanced auth helpers
-- Multipart/form-data syntax helpers
+- Multipart/form-data shorthand
 - Directory scanning and recursive discovery
 
-## Development
+## DEVELOPMENT
 
 Build:
 
@@ -337,9 +345,9 @@ Current tests cover:
 
 - Parser behavior
 - Variable resolution and precedence
-- External body files
+- External request body files
 - Request directives
-- Response assertions across all supported subjects and operators, including parse errors and runtime failures
+- Response assertions across all supported checks and operators, including parse errors and runtime failures
 - Redirect and cookie behavior
 - Timeout behavior
 - `--name` selection

@@ -13,6 +13,129 @@ import (
 	"time"
 )
 
+func TestRealMainHelpOutput(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := realMain([]string{"--help"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "NAME") || !strings.Contains(output, "SYNOPSIS") || !strings.Contains(output, "COMMANDS") {
+		t.Fatalf("expected man-style help sections, got %q", output)
+	}
+	if !strings.Contains(output, "httprun run [flags] <file.http> [more.http ...]") {
+		t.Fatalf("expected run synopsis, got %q", output)
+	}
+	if !strings.Contains(output, "httprun validate [flags] <file.http> [more.http ...]") {
+		t.Fatalf("expected validate synopsis, got %q", output)
+	}
+}
+
+func TestRealMainRunHelpOutput(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := realMain([]string{"run", "--help"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "httprun run - send requests from .http files") {
+		t.Fatalf("expected run help heading, got %q", output)
+	}
+	if !strings.Contains(output, "--fail-http         Return non-zero when HTTP status is >= 400") {
+		t.Fatalf("expected run-specific flag help, got %q", output)
+	}
+}
+
+func TestRealMainValidateHelpOutput(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := realMain([]string{"validate", "--help"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "httprun validate - check .http files without sending requests") {
+		t.Fatalf("expected validate help heading, got %q", output)
+	}
+	if !strings.Contains(output, "--jobs <n>          Number of .http files to check at the same time") {
+		t.Fatalf("expected validate jobs help, got %q", output)
+	}
+}
+
+func TestRealMainUnknownCommandShowsManualStyleError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := realMain([]string{"nope"}, &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("expected exit code 2, got %d", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected empty stdout, got %q", stdout.String())
+	}
+
+	output := stderr.String()
+	if !strings.Contains(output, "unknown command: nope") {
+		t.Fatalf("expected unknown command error, got %q", output)
+	}
+	if !strings.Contains(output, "SYNOPSIS") {
+		t.Fatalf("expected usage after unknown command, got %q", output)
+	}
+}
+
+func TestRealMainRunMissingPathShowsManualStyleError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := realMain([]string{"run"}, &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("expected exit code 2, got %d", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected empty stdout, got %q", stdout.String())
+	}
+
+	output := stderr.String()
+	if !strings.Contains(output, "missing .http file path for run") {
+		t.Fatalf("expected missing path error, got %q", output)
+	}
+	if !strings.Contains(output, "httprun run [flags] <file.http> [more.http ...]") {
+		t.Fatalf("expected run usage after missing path, got %q", output)
+	}
+}
+
+func TestRealMainValidateMissingPathShowsManualStyleError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := realMain([]string{"validate"}, &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("expected exit code 2, got %d", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected empty stdout, got %q", stdout.String())
+	}
+
+	output := stderr.String()
+	if !strings.Contains(output, "missing .http file path for validate") {
+		t.Fatalf("expected missing path error, got %q", output)
+	}
+	if !strings.Contains(output, "httprun validate [flags] <file.http> [more.http ...]") {
+		t.Fatalf("expected validate usage after missing path, got %q", output)
+	}
+}
+
 func TestRealMainRunSupportsMultipleFilesAndJobs(t *testing.T) {
 	var (
 		mu        sync.Mutex

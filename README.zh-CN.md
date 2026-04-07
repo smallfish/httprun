@@ -2,24 +2,24 @@
 
 English README: [`README.md`](./README.md)
 
-`httprun` 是一个用于执行 `.http` 文件的 Go CLI，目前支持 JetBrains `.http` 文件格式的一个收敛子集，聚焦常见 HTTP 请求工作流，不追求与 `ijhttp` 或 IDE 脚本能力完全兼容。
+## NAME
 
-## 一眼看清能力
+`httprun` - 执行 `.http` 文件的命令行工具
 
-| 类别 | 支持内容 |
-| --- | --- |
-| 命令 | `run`、`validate` |
-| 文件执行 | 单次命令执行多个 `.http` 文件，支持 `--jobs` 文件级并发 |
-| 请求组织 | `###` 分段、多请求、`# @name` 命名请求 |
-| 请求方法 | `GET`、`POST`、`PUT`、`PATCH`、`DELETE`、`HEAD` |
-| 变量 | 文件变量、env 文件、CLI `--var`、内置变量 `{{$uuid}}` / `{{$timestamp}}` |
-| 请求内容 | URL、Header、内联 Body、外部 Body 文件 `< path` |
-| 请求选项 | `@timeout`、`@connection-timeout`、`@no-redirect`、`@no-cookie-jar` |
-| 断言 | `# @assert <expression>`，支持 `status`、`body`、`json.<path>`、`header.<name>` |
-| 输出 | 默认紧凑摘要，`--verbose` 查看完整请求/响应细节 |
-| 执行模型 | 单文件内串行，多文件间并发，cookie jar 在单文件内共享 |
+## SYNOPSIS
 
-## 快速开始
+```text
+httprun run [flags] <file.http> [more.http ...]
+httprun validate [flags] <file.http> [more.http ...]
+```
+
+## DESCRIPTION
+
+`httprun` 用来运行 JetBrains 风格的 `.http` 文件，支持其中常用的一部分写法。
+
+它适合把 HTTP 请求、变量替换和简单断言写进文件后统一执行，也可以先做语法和结构检查。它不是 `ijhttp` 的完整替代品，也不支持 IDE 里的脚本功能。
+
+## QUICK START
 
 安装：
 
@@ -48,15 +48,13 @@ httprun run --name ping demo.http
 httprun validate demo.http
 ```
 
-## 常用命令
+说明：
 
-顶层用法：
+- `run` 会真正发起请求。
+- `validate` 只检查文件能不能被正确解析，不会发请求。
+- 运行成功后，默认会看到每个请求的状态码、耗时和响应体大小。
 
-```text
-Usage:
-  httprun run [flags] <file.http> [more.http ...]
-  httprun validate [flags] <file.http> [more.http ...]
-```
+## COMMANDS
 
 ### `run`
 
@@ -71,17 +69,17 @@ httprun run --env dev --var base=https://example.com path/to/demo.http
 
 | 参数 | 作用 |
 | --- | --- |
-| `--name <request>` | 只执行指定名称的请求 |
-| `--env <env>` | 从 `http-client.env.json` 和 `http-client.private.env.json` 加载变量 |
+| `--name <request>` | 只执行指定名字的请求 |
+| `--env <env>` | 从 `http-client.env.json` 和 `http-client.private.env.json` 读取变量 |
 | `--var key=value` | 覆盖变量，可重复传入 |
-| `--jobs <n>` | 文件级并发数，默认 `1` |
-| `--timeout <duration>` | 默认请求超时，默认 `30s` |
-| `--verbose` | 打印完整请求和响应细节 |
+| `--jobs <n>` | 同时执行多少个 `.http` 文件，默认 `1` |
+| `--timeout <duration>` | 请求默认超时时间，默认 `30s` |
+| `--verbose` | 打印完整的请求和响应内容 |
 | `--fail-http` | 遇到 HTTP 状态码 `>= 400` 时返回非零退出码 |
 
 ### `validate`
 
-校验一个或多个 `.http` 文件，但不发起真实请求。
+检查一个或多个 `.http` 文件是否写得合法，但不发起真实请求。
 
 ```bash
 httprun validate examples/demo.http
@@ -92,9 +90,11 @@ httprun validate --name ping --env dev path/to/demo.http
 
 支持参数：`--name`、`--env`、`--var`、`--jobs`。
 
-## 最常用的写法
+## HTTP FILE FORMAT
 
-### 多请求
+这一节说明 `.http` 文件最常用的写法。
+
+### 写多个请求
 
 ```http
 ###
@@ -107,7 +107,9 @@ Content-Type: application/json
 {"name":"demo"}
 ```
 
-### 命名请求
+`###` 用来分隔请求。一个文件里可以写多个请求。
+
+### 给请求起名字
 
 ```http
 ###
@@ -118,7 +120,7 @@ Content-Type: application/json
 {"user":"demo","pass":"secret"}
 ```
 
-执行单个命名请求：
+只执行这个请求：
 
 ```bash
 httprun run --name login demo.http
@@ -137,13 +139,109 @@ Authorization: Bearer {{token}}
 
 说明：
 
-- 文件变量使用 `@key = value`。
-- `# @name`、`# @assert`、`# @timeout` 这类请求元数据，只有写在注释指令里才会被识别，不会和变量声明冲突。
-- `@name = foo` 这种写法仍然会被当成普通变量声明，但不建议复用和指令相似的名字，否则可读性会变差。
+- 文件内变量使用 `@key = value`。
+- 使用变量时写成 `{{key}}`。
+- `# @name`、`# @assert`、`# @timeout` 这类写在注释里的指令，和 `@base = ...` 这种变量声明不是一回事。
+- `@name = foo` 仍然会被当成普通变量，但不建议这样写，不然文件读起来容易混淆。
 
-### 环境变量文件
+### 内置变量
 
-`httprun` 会在 `.http` 文件同目录查找：
+当前支持：
+
+- `{{$uuid}}`
+- `{{$timestamp}}`
+
+```http
+POST https://example.com/events
+X-Request-Id: {{$uuid}}
+
+{"createdAt":"{{$timestamp}}"}
+```
+
+### 读取外部请求体文件
+
+```http
+@payload = payload.json
+
+###
+POST https://example.com/items
+Content-Type: application/json
+
+< {{payload}}
+```
+
+说明：
+
+- `< path` 表示从外部文件读取请求体。
+- 路径相对于当前 `.http` 文件所在目录解析。
+- 读取进来的文件内容也会继续做变量替换。
+
+### 内容放在哪里
+
+- 文件内变量、请求名字、请求前注释指令、断言，都写在请求行之前。
+- 请求头写在请求行之后、第一行空行之前。
+- 第一行空行之后的内容会被当成请求体。
+- 如果在请求体后面继续写内容，这些内容仍然会被当成请求体，而不是新的指令。
+
+## REQUEST DIRECTIVES
+
+请求前的注释指令，写在请求行之前。
+
+```http
+###
+# @timeout 50s
+# @connection-timeout 2s
+# @no-redirect
+GET {{base}}/slow
+```
+
+有些指令也可以和请求行写在同一行：
+
+```http
+###
+# @no-redirect GET {{base}}/redirect
+```
+
+| 指令 | 作用 |
+| --- | --- |
+| `# @timeout 50s` | 覆盖当前请求的超时时间 |
+| `# @connection-timeout 2s` | 覆盖当前请求的连接超时时间 |
+| `# @no-redirect` | 不自动跟随重定向 |
+| `# @no-cookie-jar` | 不把这次响应里的 Cookie 写回共享的 Cookie 存储 |
+
+## ASSERTIONS
+
+断言也写在请求行之前。
+
+```http
+###
+# @assert status == 200
+# @assert body contains hello
+# @assert json.data.user.name == "demo"
+# @assert header.Content-Type contains "application/json"
+GET {{base}}/profile
+```
+
+### 支持检查哪些内容
+
+| 检查对象 | 比较方式 | 示例 |
+| --- | --- | --- |
+| `status` | `==`、`!=`、`>`、`>=`、`<`、`<=` | `# @assert status == 200` |
+| `body` | `==`、`!=`、`contains`、`not_contains`、`exists`、`not_exists` | `# @assert body contains hello` |
+| `json.<path>` | `==`、`!=`、`>`、`>=`、`<`、`<=`、`exists`、`not_exists` | `# @assert json.data.count >= 2` |
+| `header.<name>` | `==`、`!=`、`contains`、`not_contains`、`exists`、`not_exists` | `# @assert header.X-Trace-Id exists` |
+
+### 断言规则
+
+- `@assert` 必须写在请求行之前。
+- 如果把 `@assert` 写到请求体后面，它会被当成普通请求体内容。
+- `json.<path>` 用点号一层层取字段，数组下标用数字，例如 `json.data.items.0.id`。
+- JSON 比较值必须是合法 JSON。字符串要带引号，布尔值写成 `true` 或 `false`，数字按 JSON 数字格式书写。
+- 只要有一个断言失败，当前文件就会立刻停止，后面的请求不会继续执行。
+
+## FILES
+
+`httprun` 会在 `.http` 文件同目录查找下面两个文件：
 
 - `http-client.env.json`
 - `http-client.private.env.json`
@@ -165,7 +263,7 @@ Authorization: Bearer {{token}}
 httprun run --env dev path/to/demo.http
 ```
 
-变量优先级：
+变量覆盖顺序从高到低如下：
 
 1. CLI `--var`
 2. `http-client.env.json`
@@ -173,105 +271,25 @@ httprun run --env dev path/to/demo.http
 4. 文件内变量，例如 `@base = ...`
 5. 内置变量
 
-### 内置变量
+## EXECUTION RULES
 
-当前支持：
+- 一个 `.http` 文件里的请求按顺序执行。
+- 同一次命令中的多个文件可以通过 `--jobs` 同时执行。
+- 即使多个文件同时执行，输出仍然会按输入顺序打印。
+- 同一个文件里的多个请求会共享 Cookie。
+- Cookie 不会跨文件共享。
 
-- `{{$uuid}}`
-- `{{$timestamp}}`
+## EXIT STATUS
 
-```http
-POST https://example.com/events
-X-Request-Id: {{$uuid}}
+- `run` 在所有目标文件都成功时返回 `0`。
+- `run` 只要任一文件失败就返回 `1`。
+- `validate` 在所有文件都校验通过时返回 `0`。
+- `validate` 只要任一文件校验失败就返回 `1`。
+- 非法 CLI 用法返回 `2`。
+- 响应断言失败始终返回 `1`。
+- 启用 `--fail-http` 后，HTTP 状态码 `>= 400` 会被视为命令失败。
 
-{"createdAt":"{{$timestamp}}"}
-```
-
-### 外部 Body 文件
-
-```http
-@payload = payload.json
-
-###
-POST https://example.com/items
-Content-Type: application/json
-
-< {{payload}}
-```
-
-Body 文件路径相对于 `.http` 文件所在目录解析，文件内容中的变量也会继续替换。
-
-### 放置规则
-
-- 文件变量、请求名、请求指令、断言都应该写在请求行之前。
-- Header 写在请求行之后、首个空行之前。
-- 首个空行之后开始进入请求 body。
-- body 之后再写的内容都会被当成 body 内容，而不是请求元数据。
-
-## 请求指令
-
-请求指令是请求行之前的注释行。
-
-```http
-###
-# @timeout 50s
-# @connection-timeout 2s
-# @no-redirect
-GET {{base}}/slow
-```
-
-请求行类指令支持内联写法：
-
-```http
-###
-# @no-redirect GET {{base}}/redirect
-```
-
-| 指令 | 作用 |
-| --- | --- |
-| `# @timeout 50s` | 覆盖单请求超时 |
-| `# @connection-timeout 2s` | 覆盖连接超时 |
-| `# @no-redirect` | 禁止自动跟随重定向 |
-| `# @no-cookie-jar` | 不把响应 cookie 写入共享 jar |
-
-## 断言
-
-断言也是请求行之前的注释指令。
-
-```http
-###
-# @assert status == 200
-# @assert body contains hello
-# @assert json.data.user.name == "demo"
-# @assert header.Content-Type contains "application/json"
-GET {{base}}/profile
-```
-
-### 支持的 Subject 和 Operator
-
-| Subject | Operator | 示例 |
-| --- | --- | --- |
-| `status` | `==`、`!=`、`>`、`>=`、`<`、`<=` | `# @assert status == 200` |
-| `body` | `==`、`!=`、`contains`、`not_contains`、`exists`、`not_exists` | `# @assert body contains hello` |
-| `json.<path>` | `==`、`!=`、`>`、`>=`、`<`、`<=`、`exists`、`not_exists` | `# @assert json.data.count >= 2` |
-| `header.<name>` | `==`、`!=`、`contains`、`not_contains`、`exists`、`not_exists` | `# @assert header.X-Trace-Id exists` |
-
-### 断言说明
-
-- `@assert` 必须写在请求行之前。如果写在 body 后面，它会被当成 body 内容，而不是断言。
-- `json.<path>` 使用点路径语法，数组下标使用数字片段，例如 `json.data.items.0.id`。
-- JSON 比较值必须是合法 JSON。字符串要带引号，布尔值使用 `true` / `false`，数字使用 JSON 数字字面量。
-- 任一断言失败时，当前文件会立刻停止执行，后续请求会被跳过。
-
-## 执行模型
-
-- 单个 `.http` 文件内部按顺序执行。
-- 同一次命令中的多个文件可通过 `--jobs` 并发执行。
-- 即使文件并发执行，输出也按输入顺序打印。
-- cookie jar 在单个文件执行过程中共享。
-- cookie jar 不会跨文件共享。
-
-## 示例文件
+## EXAMPLES
 
 主示例：
 
@@ -279,8 +297,8 @@ GET {{base}}/profile
 
 更多示例：
 
-- [examples/all_methods.http](./examples/all_methods.http)：常见 HTTP 方法、变量、env 文件、外部 Body 文件
-- [examples/assertions.http](./examples/assertions.http)：成功断言示例，覆盖 `status`、`body`、`json.*`、`header.*` 和多种 operator
+- [examples/all_methods.http](./examples/all_methods.http)：常见 HTTP 方法、变量、环境变量文件、外部请求体文件
+- [examples/assertions.http](./examples/assertions.http)：成功断言示例，覆盖 `status`、`body`、`json.*`、`header.*` 和多种比较方式
 - [examples/assertions_failure.http](./examples/assertions_failure.http)：故意失败的断言示例，展示非零退出码和后续请求被跳过
 - [examples/request_options.http](./examples/request_options.http)：`@no-redirect` 和 `@no-cookie-jar`
 - [examples/timeout.http](./examples/timeout.http)：请求级 `@timeout`
@@ -294,19 +312,9 @@ go run ./cmd/httprun run examples/assertions.http
 go run ./cmd/httprun run examples/assertions_failure.http
 ```
 
-## 输出和退出码
+## LIMITATIONS
 
-- `run` 默认输出紧凑摘要，包含请求编号、状态码、耗时和响应体大小。
-- `--verbose` 会打印完整的请求和响应细节，包括头和 body。
-- `run` 在所有目标文件都成功时返回 `0`。
-- `run` 只要任一文件失败就返回 `1`。
-- `validate` 在所有文件都校验通过时返回 `0`。
-- `validate` 只要任一文件校验失败就返回 `1`。
-- 非法 CLI 用法返回 `2`。
-- 响应断言失败始终返回 `1`。
-- 启用 `--fail-http` 后，HTTP 状态码 `>= 400` 会被视为命令失败。
-
-## 暂不支持
+目前更适合简单请求、变量替换和断言，不适合复杂脚本场景。下面这些能力暂不支持：
 
 - pre-request 脚本
 - response handler 脚本
@@ -316,10 +324,10 @@ go run ./cmd/httprun run examples/assertions_failure.http
 - GraphQL 专用语法
 - gRPC
 - OAuth 和更高级的认证辅助能力
-- multipart/form-data 语法糖
+- multipart/form-data 的简写写法
 - 目录扫描和递归发现
 
-## 开发
+## DEVELOPMENT
 
 构建：
 
@@ -337,9 +345,9 @@ make test
 
 - parser 行为
 - 变量解析和优先级
-- 外部 Body 文件
-- 请求指令解析
-- 响应断言的全部 subject 和 operator，以及解析错误和运行时失败路径
+- 外部请求体文件
+- 请求前注释指令
+- 响应断言的全部检查对象和比较方式，以及解析错误和运行时失败路径
 - redirect 和 cookie 行为
 - timeout 行为
 - `--name` 选择逻辑

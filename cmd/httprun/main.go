@@ -28,12 +28,12 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	case "run":
 		return runCommand(args[1:], stdout, stderr)
 	case "validate":
-		return validateCommand(args[1:], stderr)
+		return validateCommand(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
 		printUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "unknown command %q\n\n", args[0])
+		fmt.Fprintf(stderr, "unknown command: %s\n\n", args[0])
 		printUsage(stderr)
 		return 2
 	}
@@ -41,22 +41,29 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 
 func runCommand(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(io.Discard)
 
 	vars := newVarsFlag()
-	name := fs.String("name", "", "execute a named request")
-	envName := fs.String("env", "", "environment name from http-client.env.json")
-	jobs := fs.Int("jobs", 1, "number of files to process concurrently")
-	timeout := fs.Duration("timeout", 30*time.Second, "request timeout")
-	verbose := fs.Bool("verbose", false, "print expanded request and response details")
-	failHTTP := fs.Bool("fail-http", false, "return non-zero on HTTP status >= 400")
-	fs.Var(vars, "var", "override variable (key=value), may be repeated")
+	name := fs.String("name", "", "run only the named request")
+	envName := fs.String("env", "", "read variables from http-client.env.json")
+	jobs := fs.Int("jobs", 1, "number of .http files to run at the same time")
+	timeout := fs.Duration("timeout", 30*time.Second, "default request timeout")
+	verbose := fs.Bool("verbose", false, "print full request and response details")
+	failHTTP := fs.Bool("fail-http", false, "return non-zero when HTTP status is >= 400")
+	fs.Var(vars, "var", "override a variable (key=value), may be repeated")
 
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			printRunUsage(stdout)
+			return 0
+		}
+		fmt.Fprintln(stderr, err)
+		printRunUsage(stderr)
 		return 2
 	}
 	if fs.NArg() == 0 {
-		fmt.Fprintln(stderr, "run requires at least one .http file path")
+		fmt.Fprintln(stderr, "missing .http file path for run")
+		printRunUsage(stderr)
 		return 2
 	}
 	if *jobs <= 0 {
@@ -112,21 +119,28 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 	return exitCode
 }
 
-func validateCommand(args []string, stderr io.Writer) int {
+func validateCommand(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(io.Discard)
 
 	vars := newVarsFlag()
-	name := fs.String("name", "", "validate a named request only")
-	envName := fs.String("env", "", "environment name from http-client.env.json")
-	jobs := fs.Int("jobs", 1, "number of files to process concurrently")
-	fs.Var(vars, "var", "override variable (key=value), may be repeated")
+	name := fs.String("name", "", "check only the named request")
+	envName := fs.String("env", "", "read variables from http-client.env.json")
+	jobs := fs.Int("jobs", 1, "number of .http files to check at the same time")
+	fs.Var(vars, "var", "override a variable (key=value), may be repeated")
 
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			printValidateUsage(stdout)
+			return 0
+		}
+		fmt.Fprintln(stderr, err)
+		printValidateUsage(stderr)
 		return 2
 	}
 	if fs.NArg() == 0 {
-		fmt.Fprintln(stderr, "validate requires at least one .http file path")
+		fmt.Fprintln(stderr, "missing .http file path for validate")
+		printValidateUsage(stderr)
 		return 2
 	}
 	if *jobs <= 0 {
@@ -160,18 +174,58 @@ func validateCommand(args []string, stderr io.Writer) int {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "NAME")
+	fmt.Fprintln(w, "  httprun - command-line tool for running .http files")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "SYNOPSIS")
 	fmt.Fprintln(w, "  httprun run [flags] <file.http> [more.http ...]")
 	fmt.Fprintln(w, "  httprun validate [flags] <file.http> [more.http ...]")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Flags:")
-	fmt.Fprintln(w, "  --name <request>    Execute or validate a named request")
-	fmt.Fprintln(w, "  --env <env>         Load variables from http-client.env.json files")
+	fmt.Fprintln(w, "COMMANDS")
+	fmt.Fprintln(w, "  run                 Send requests from one or more .http files")
+	fmt.Fprintln(w, "  validate            Check .http files without sending requests")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "COMMON FLAGS")
+	fmt.Fprintln(w, "  --name <request>    Select a named request")
+	fmt.Fprintln(w, "  --env <env>         Read variables from http-client.env.json files")
 	fmt.Fprintln(w, "  --var key=value     Override a variable, may be repeated")
-	fmt.Fprintln(w, "  --jobs <n>          Process files concurrently")
-	fmt.Fprintln(w, "  --timeout 30s       Request timeout for run")
-	fmt.Fprintln(w, "  --verbose           Print expanded request and response details")
-	fmt.Fprintln(w, "  --fail-http         Return non-zero on HTTP status >= 400")
+	fmt.Fprintln(w, "  --jobs <n>          Number of files to process at the same time")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "RUN-ONLY FLAGS")
+	fmt.Fprintln(w, "  --timeout 30s       Default request timeout")
+	fmt.Fprintln(w, "  --verbose           Print full request and response details")
+	fmt.Fprintln(w, "  --fail-http         Return non-zero when HTTP status is >= 400")
+}
+
+func printRunUsage(w io.Writer) {
+	fmt.Fprintln(w, "NAME")
+	fmt.Fprintln(w, "  httprun run - send requests from .http files")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "SYNOPSIS")
+	fmt.Fprintln(w, "  httprun run [flags] <file.http> [more.http ...]")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "FLAGS")
+	fmt.Fprintln(w, "  --name <request>    Run only the named request")
+	fmt.Fprintln(w, "  --env <env>         Read variables from http-client.env.json files")
+	fmt.Fprintln(w, "  --var key=value     Override a variable, may be repeated")
+	fmt.Fprintln(w, "  --jobs <n>          Number of .http files to run at the same time")
+	fmt.Fprintln(w, "  --timeout 30s       Default request timeout")
+	fmt.Fprintln(w, "  --verbose           Print full request and response details")
+	fmt.Fprintln(w, "  --fail-http         Return non-zero when HTTP status is >= 400")
+}
+
+func printValidateUsage(w io.Writer) {
+	fmt.Fprintln(w, "NAME")
+	fmt.Fprintln(w, "  httprun validate - check .http files without sending requests")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "SYNOPSIS")
+	fmt.Fprintln(w, "  httprun validate [flags] <file.http> [more.http ...]")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "FLAGS")
+	fmt.Fprintln(w, "  --name <request>    Check only the named request")
+	fmt.Fprintln(w, "  --env <env>         Read variables from http-client.env.json files")
+	fmt.Fprintln(w, "  --var key=value     Override a variable, may be repeated")
+	fmt.Fprintln(w, "  --jobs <n>          Number of .http files to check at the same time")
 }
 
 type varsFlag struct {
