@@ -24,7 +24,7 @@ func TestWriteResultCompactOutput(t *testing.T) {
 	}
 
 	var buffer bytes.Buffer
-	if err := WriteResult(&buffer, 1, result, false); err != nil {
+	if err := WriteResult(&buffer, 1, result, false, nil); err != nil {
 		t.Fatalf("WriteResult() error = %v", err)
 	}
 
@@ -67,7 +67,7 @@ func TestWriteResultVerboseOutputIsStableAndDetailed(t *testing.T) {
 	}
 
 	var buffer bytes.Buffer
-	if err := WriteResult(&buffer, 2, result, true); err != nil {
+	if err := WriteResult(&buffer, 2, result, true, nil); err != nil {
 		t.Fatalf("WriteResult() error = %v", err)
 	}
 
@@ -110,7 +110,7 @@ func TestWriteResultCompactOutputIncludesFailedTextBody(t *testing.T) {
 	}
 
 	var buffer bytes.Buffer
-	if err := WriteResult(&buffer, 2, result, false); err != nil {
+	if err := WriteResult(&buffer, 2, result, false, nil); err != nil {
 		t.Fatalf("WriteResult() error = %v", err)
 	}
 
@@ -141,12 +141,44 @@ func TestWriteResultCompactOutputSkipsFailedBinaryBody(t *testing.T) {
 	}
 
 	var buffer bytes.Buffer
-	if err := WriteResult(&buffer, 1, result, false); err != nil {
+	if err := WriteResult(&buffer, 1, result, false, nil); err != nil {
 		t.Fatalf("WriteResult() error = %v", err)
 	}
 
 	output := buffer.String()
 	if strings.Contains(output, "Response Body") {
 		t.Fatalf("did not expect binary response body, got %q", output)
+	}
+}
+
+func TestWriteResultCompactOutputIncludesAssertionFailuresAndBody(t *testing.T) {
+	result := executor.Result{
+		Request: resolver.ResolvedRequest{
+			Name:   "check-json",
+			Method: http.MethodGet,
+			URL:    "http://127.0.0.1:28080/data",
+		},
+		Response: &http.Response{
+			Status:     "200 OK",
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"application/json"},
+			},
+		},
+		Body:     []byte(`{"name":"demo"}`),
+		Duration: 8 * time.Millisecond,
+	}
+
+	var buffer bytes.Buffer
+	if err := WriteResult(&buffer, 1, result, false, []string{`line 4: expected json.name == "other", got "demo"`}); err != nil {
+		t.Fatalf("WriteResult() error = %v", err)
+	}
+
+	output := buffer.String()
+	if !strings.Contains(output, "Assertion Failures:\n     - line 4: expected json.name == \"other\", got \"demo\"") {
+		t.Fatalf("expected assertion failure section, got %q", output)
+	}
+	if !strings.Contains(output, "Response Body:\n     {\"name\":\"demo\"}") {
+		t.Fatalf("expected response body for assertion failure, got %q", output)
 	}
 }

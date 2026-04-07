@@ -2,61 +2,53 @@
 
 中文文档：[`README.zh-CN.md`](./README.zh-CN.md)
 
-`httprun` is a Go CLI for running `.http` files and currently supports a subset of the JetBrains `.http` file format.
+`httprun` is a Go CLI for running `.http` files. It intentionally supports a focused subset of the JetBrains `.http` format for common HTTP request workflows. It does not aim to be fully compatible with `ijhttp` or IDE scripting features.
 
-Current scope is intentionally narrow: it focuses on common HTTP request workflows and supports only part of the JetBrains `.http` format. It does not claim full compatibility with `ijhttp` or IDE scripting features.
+## At A Glance
 
-## Status
+| Area | Support |
+| --- | --- |
+| Commands | `run`, `validate` |
+| File execution | Multiple `.http` files per command, file-level concurrency via `--jobs` |
+| Request layout | `###` request separators, `# @name` named requests |
+| Methods | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD` |
+| Variables | File variables, env files, CLI `--var`, built-ins `{{$uuid}}` / `{{$timestamp}}` |
+| Request content | URL, headers, inline body, external body file via `< path` |
+| Request options | `@timeout`, `@connection-timeout`, `@no-redirect`, `@no-cookie-jar` |
+| Assertions | `# @assert <expression>` with `status`, `body`, `json.<path>`, `header.<name>` |
+| Output model | Compact summary by default, `--verbose` for expanded request/response details |
+| Execution model | Sequential inside one file, concurrent across files, cookie jar shared within a file |
 
-Current implementation supports:
+## Quick Start
 
-- Multiple `.http` files in one command
-- File-level concurrency with `--jobs`
-- Sequential execution inside each file
-- Multiple requests per file via `###`
-- Named requests via `# @name`
-- Common HTTP methods such as `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`
-- File variables via `@key = value`
-- Variable interpolation in URL, headers, inline body, and external body files
-- Public and private environment files
-- Built-in variables `{{$uuid}}` and `{{$timestamp}}`
-- Request options:
-  - `# @timeout`
-  - `# @connection-timeout`
-  - `# @no-redirect`
-  - `# @no-cookie-jar`
-- External request body files via `< path/to/file`
-- Cookie jar sharing within one file execution
-- `run` and `validate` commands
-
-Not supported yet:
-
-- Pre-request scripts
-- Response handler scripts
-- Extracting variables from previous responses
-- JavaScript APIs such as `client.*`
-- WebSocket
-- GraphQL-specific syntax
-- gRPC
-- OAuth and advanced auth helpers
-- Multipart/form-data syntax helpers
-- Directory scanning and recursive discovery
-
-## Install
-
-Install with `go install`:
+Install:
 
 ```bash
 go install github.com/smallfish/httprun/cmd/httprun@latest
-```
-
-Then verify:
-
-```bash
 httprun --help
 ```
 
-## Commands
+Minimal file:
+
+```http
+@base = https://httpbin.org
+
+###
+# @name ping
+# @assert status == 200
+GET {{base}}/get
+Accept: application/json
+```
+
+Run it:
+
+```bash
+httprun run demo.http
+httprun run --name ping demo.http
+httprun validate demo.http
+```
+
+## Common Commands
 
 Top-level usage:
 
@@ -73,24 +65,19 @@ Execute one or more `.http` files.
 ```bash
 httprun run examples/demo.http
 httprun run --name ping examples/demo.http
-```
-
-Generic examples:
-
-```bash
 httprun run --jobs 4 a.http b.http c.http
 httprun run --env dev --var base=https://example.com path/to/demo.http
 ```
 
-Flags:
-
-- `--name <request>`: execute only the named request
-- `--env <env>`: load variables from `http-client.env.json` and `http-client.private.env.json`
-- `--var key=value`: override variables, can be repeated
-- `--jobs <n>`: process files concurrently, default `1`
-- `--timeout <duration>`: default request timeout for `run`, default `30s`
-- `--verbose`: print expanded request and response details, including headers and bodies
-- `--fail-http`: return non-zero if any response status is `>= 400`
+| Flag | Meaning |
+| --- | --- |
+| `--name <request>` | Execute only the named request |
+| `--env <env>` | Load variables from `http-client.env.json` and `http-client.private.env.json` |
+| `--var key=value` | Override variables, repeatable |
+| `--jobs <n>` | Number of files to process concurrently, default `1` |
+| `--timeout <duration>` | Default request timeout, default `30s` |
+| `--verbose` | Print expanded request and response details |
+| `--fail-http` | Return non-zero on HTTP status `>= 400` |
 
 ### `validate`
 
@@ -99,27 +86,15 @@ Validate one or more `.http` files without sending requests.
 ```bash
 httprun validate examples/demo.http
 httprun validate --name ping examples/demo.http
-```
-
-Generic examples:
-
-```bash
 httprun validate --jobs 8 a.http b.http
 httprun validate --name ping --env dev path/to/demo.http
 ```
 
-Flags:
+Supported flags: `--name`, `--env`, `--var`, `--jobs`.
 
-- `--name <request>`
-- `--env <env>`
-- `--var key=value`
-- `--jobs <n>`
-
-## Syntax Supported
+## Most Common Patterns
 
 ### Multiple requests
-
-Use `###` to split requests:
 
 ```http
 ###
@@ -143,7 +118,7 @@ Content-Type: application/json
 {"user":"demo","pass":"secret"}
 ```
 
-Run a single named request:
+Run one named request:
 
 ```bash
 httprun run --name login demo.http
@@ -162,7 +137,7 @@ Authorization: Bearer {{token}}
 
 ### Environment files
 
-`httprun` looks for environment files in the same directory as the `.http` file:
+`httprun` looks in the same directory as the `.http` file for:
 
 - `http-client.env.json`
 - `http-client.private.env.json`
@@ -184,22 +159,20 @@ Use them with:
 httprun run --env dev path/to/demo.http
 ```
 
-Variable precedence is:
+Variable precedence:
 
 1. CLI `--var`
 2. `http-client.env.json`
 3. `http-client.private.env.json`
-4. file variables such as `@base = ...`
-5. built-in variables
+4. File variables such as `@base = ...`
+5. Built-in variables
 
 ### Built-in variables
 
-Currently supported:
+Supported built-ins:
 
 - `{{$uuid}}`
 - `{{$timestamp}}`
-
-Example:
 
 ```http
 POST https://example.com/events
@@ -209,8 +182,6 @@ X-Request-Id: {{$uuid}}
 ```
 
 ### External body files
-
-You can load the request body from a file:
 
 ```http
 @payload = payload.json
@@ -224,124 +195,123 @@ Content-Type: application/json
 
 The body file path is resolved relative to the `.http` file directory. Variable interpolation also applies inside the loaded file content.
 
-### Request options
+## Request Directives
 
-Request options are set with comment directives before the request line.
-
-Timeout override:
+Directives are comment lines before the request line.
 
 ```http
 ###
-# @timeout 50 ms
+# @timeout 50s
+# @connection-timeout 2s
+# @no-redirect
 GET {{base}}/slow
 ```
 
-Connection timeout override:
-
-```http
-###
-# @connection-timeout 2 s
-GET {{base}}/health
-```
-
-Disable redirect following:
-
-```http
-###
-# @no-redirect
-GET {{base}}/redirect
-```
-
-Disable writing response cookies into the shared jar:
-
-```http
-###
-# @no-cookie-jar
-GET {{base}}/login
-```
-
-Inline form is also supported:
+Inline form is supported for request-line directives:
 
 ```http
 ###
 # @no-redirect GET {{base}}/redirect
 ```
 
-## Execution Model
+| Directive | Meaning |
+| --- | --- |
+| `# @timeout 50s` | Override request timeout |
+| `# @connection-timeout 2s` | Override connection timeout |
+| `# @no-redirect` | Do not follow redirects |
+| `# @no-cookie-jar` | Do not write response cookies into the shared jar |
 
-Execution rules are:
+## Assertions
 
-- Requests inside one `.http` file are executed sequentially
-- Files passed in one command can be executed concurrently with `--jobs`
-- Output is printed in input file order even when files run concurrently
-- Cookie jar is shared within one file execution
-- Cookie jar is not shared across different files
-
-This keeps per-file request order stable while still allowing parallel execution across independent test cases.
-
-## Example
-
-Example file: [examples/demo.http](./examples/demo.http)
+Assertions are comment directives before the request line.
 
 ```http
-@base = https://httpbin.org
-
 ###
-# @name ping
-GET {{base}}/get
-Accept: application/json
-
-###
-# @name createAnything
-POST {{base}}/anything
-Content-Type: application/json
-X-Request-Id: {{$uuid}}
-
-{
-  "createdAt": "{{$timestamp}}",
-  "source": "httprun"
-}
+# @assert status == 200
+# @assert body contains "\"ok\": true"
+# @assert json.data.user.name == "demo"
+# @assert header.Content-Type contains "application/json"
+GET {{base}}/profile
 ```
 
-Run it:
+### Supported Subjects And Operators
+
+| Subject | Operators | Example |
+| --- | --- | --- |
+| `status` | `==`, `!=`, `>`, `>=`, `<`, `<=` | `# @assert status == 200` |
+| `body` | `==`, `!=`, `contains`, `not_contains`, `exists`, `not_exists` | `# @assert body contains hello` |
+| `json.<path>` | `==`, `!=`, `>`, `>=`, `<`, `<=`, `exists`, `not_exists` | `# @assert json.data.count >= 2` |
+| `header.<name>` | `==`, `!=`, `contains`, `not_contains`, `exists`, `not_exists` | `# @assert header.X-Trace-Id exists` |
+
+### Assertion Notes
+
+- `@assert` must appear before the request line. If you write it after the body, it is treated as body content rather than an assertion.
+- `json.<path>` uses dot-path syntax. Arrays use numeric segments such as `json.data.items.0.id`.
+- JSON comparison values must be valid JSON. Strings must be quoted, booleans use `true` / `false`, and numbers use JSON number syntax.
+- If any assertion fails, execution of the current file stops immediately. Remaining requests in that file are skipped.
+
+## Execution Model
+
+- Requests inside one `.http` file run sequentially.
+- Files in one command can run concurrently with `--jobs`.
+- Output is printed in input file order even when files run concurrently.
+- Cookie jar is shared within one file execution.
+- Cookie jar is not shared across different files.
+
+## Examples
+
+Primary example:
+
+- [`examples/demo.http`](./examples/demo.http): minimal end-to-end example
+
+Additional examples:
+
+- [`examples/all_methods.http`](./examples/all_methods.http): common HTTP methods, variables, env files, external body files
+- [`examples/assertions.http`](./examples/assertions.http): successful assertions across `status`, `body`, `json.*`, `header.*`, and multiple operators
+- [`examples/assertions_failure.http`](./examples/assertions_failure.http): intentional assertion failure, non-zero exit, and skipped follow-up requests
+- [`examples/request_options.http`](./examples/request_options.http): `@no-redirect` and `@no-cookie-jar`
+- [`examples/timeout.http`](./examples/timeout.http): request-level `@timeout`
+- [`examples/http-client.env.json`](./examples/http-client.env.json) and [`examples/http-client.private.env.json`](./examples/http-client.private.env.json): environment file examples
+
+Try them:
 
 ```bash
 go run ./cmd/httprun run examples/demo.http
-go run ./cmd/httprun run --name ping examples/demo.http
+go run ./cmd/httprun run examples/assertions.http
+go run ./cmd/httprun run examples/assertions_failure.http
 ```
 
-Additional example files in [`examples/`](./examples):
+## Output And Exit Codes
 
-- [`examples/all_methods.http`](./examples/all_methods.http): common HTTP methods, variables, env files, external body files; runnable with `httprun run --env dev examples/all_methods.http`
-- [`examples/request_options.http`](./examples/request_options.http): `@no-redirect` and `@no-cookie-jar`, using public `httpbin` endpoints
-- [`examples/timeout.http`](./examples/timeout.http): request-level `@timeout`, using `httpbin /delay`
-- [`examples/http-client.env.json`](./examples/http-client.env.json) and [`examples/http-client.private.env.json`](./examples/http-client.private.env.json): environment file examples
+- Default `run` output is a compact per-request summary with request numbering, status, duration, and response size.
+- `--verbose` prints full request and response details, including headers and bodies.
+- `run` returns `0` when all selected files complete successfully.
+- `run` returns `1` if any file fails.
+- `validate` returns `0` when all files validate successfully.
+- `validate` returns `1` if any file fails validation.
+- Invalid CLI usage returns `2`.
+- Assertion failures always return `1`.
+- With `--fail-http`, HTTP status `>= 400` is treated as command failure.
 
-## Output and Exit Codes
+## Not Supported
 
-Default `run` output is a compact per-request summary with request numbering, status, duration, and response size.
-Use `--verbose` to print full request and response details, including headers and bodies.
-
-- `run` returns `0` when all selected files complete successfully
-- `run` returns `1` if any file fails
-- `validate` returns `0` when all files validate successfully
-- `validate` returns `1` if any file fails validation
-- invalid CLI usage returns `2`
-
-With `--fail-http`, HTTP responses with status `>= 400` are treated as command failures.
+- Pre-request scripts
+- Response handler scripts
+- Extracting variables from previous responses
+- JavaScript APIs such as `client.*`
+- WebSocket
+- GraphQL-specific syntax
+- gRPC
+- OAuth and advanced auth helpers
+- Multipart/form-data syntax helpers
+- Directory scanning and recursive discovery
 
 ## Development
 
-Build locally:
+Build:
 
 ```bash
 make build
-```
-
-Or run directly:
-
-```bash
-make run-help
 ```
 
 Run tests:
@@ -356,6 +326,7 @@ Current tests cover:
 - Variable resolution and precedence
 - External body files
 - Request directives
+- Response assertions across all supported subjects and operators, including parse errors and runtime failures
 - Redirect and cookie behavior
 - Timeout behavior
 - `--name` selection

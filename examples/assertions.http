@@ -1,0 +1,41 @@
+@base = https://httpbin.org
+
+###
+# @name assertStatusNoBody
+# @assert status == 204
+# @assert status != 500
+# @assert body not_exists
+GET {{base}}/status/204
+
+###
+# @name assertPlainTextBody
+# @assert status == 200
+# @assert body exists
+# @assert body == hello
+# @assert body not_contains error
+GET {{base}}/base64/aGVsbG8=
+
+###
+# @name assertJSONPayload
+# @assert status >= 200
+# @assert status < 300
+# @assert body contains demo
+# @assert json.json.name == "demo"
+# @assert json.json.count >= 2
+# @assert json.json.count <= 2
+# @assert json.json.enabled == true
+# @assert json.json.tags exists
+# @assert json.json.missing not_exists
+POST {{base}}/anything/assertions
+Content-Type: application/json
+
+{"name":"demo","count":2,"enabled":true,"tags":["one","two"]}
+
+###
+# @name assertHeaders
+# @assert status == 200
+# @assert header.X-Trace-Id exists
+# @assert header.X-Trace-Id == trace-123
+# @assert header.Content-Type contains "application/json"
+# @assert header.X-Not-Set not_exists
+GET {{base}}/response-headers?X-Trace-Id=trace-123&Content-Type=application/json

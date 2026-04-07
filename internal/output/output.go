@@ -14,7 +14,7 @@ import (
 	"github.com/smallfish/httprun/internal/executor"
 )
 
-func WriteResult(w io.Writer, index int, result executor.Result, verbose bool) error {
+func WriteResult(w io.Writer, index int, result executor.Result, verbose bool, assertionFailures []string) error {
 	title := result.Request.Name
 	if title == "" {
 		title = fmt.Sprintf("%s %s", result.Request.Method, compactURL(result.Request.URL))
@@ -51,6 +51,11 @@ func WriteResult(w io.Writer, index int, result executor.Result, verbose bool) e
 	if _, err := fmt.Fprintf(w, "   %s  %s  %s\n", result.Response.Status, formatDuration(result.Duration), formatBytes(len(result.Body))); err != nil {
 		return err
 	}
+	if len(assertionFailures) > 0 {
+		if err := writeListSection(w, "Assertion Failures", assertionFailures); err != nil {
+			return err
+		}
+	}
 
 	if verbose {
 		if err := writeHeaderSection(w, "Response Headers", result.Response.Header); err != nil {
@@ -61,7 +66,7 @@ func WriteResult(w io.Writer, index int, result executor.Result, verbose bool) e
 				return err
 			}
 		}
-	} else if failedResponse(result.Response) {
+	} else if failedResponse(result.Response) || len(assertionFailures) > 0 {
 		body, truncated := formatFailedBody(result.Response.Header, result.Body)
 		if body != "" {
 			label := "Response Body"
@@ -110,6 +115,21 @@ func writeHeaderSection(w io.Writer, label string, headers http.Header) error {
 			if _, err := fmt.Fprintf(w, "     %s: %s\n", key, value); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func writeListSection(w io.Writer, label string, items []string) error {
+	if len(items) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintf(w, "   %s:\n", label); err != nil {
+		return err
+	}
+	for _, item := range items {
+		if _, err := fmt.Fprintf(w, "     - %s\n", item); err != nil {
+			return err
 		}
 	}
 	return nil

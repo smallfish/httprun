@@ -1,0 +1,11 @@
+@base = https://httpbin.org
+
+###
+# @name assertFailure
+# @assert status == 201
+# @assert body not_contains hello
+GET {{base}}/base64/aGVsbG8=
+
+###
+# @name shouldBeSkipped
+GET {{base}}/get

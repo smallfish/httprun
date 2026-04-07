@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -12,6 +13,9 @@ import (
 )
 
 var durationDirectivePattern = regexp.MustCompile(`^([0-9]+)\s*(ms|s|m)?(?:\s+(.*))?$`)
+var unaryAssertionPattern = regexp.MustCompile(`^(.+?)\s+(exists|not_exists)\s*$`)
+var wordBinaryAssertionPattern = regexp.MustCompile(`^(.+?)\s+(contains|not_contains)\s+(.+)$`)
+var symbolBinaryAssertionPattern = regexp.MustCompile(`^(.+?)\s*(==|!=|>=|<=|>|<)\s*(.+)$`)
 
 type parseLine struct {
 	number int
@@ -261,6 +265,8 @@ func isRequestDirective(trimmed string) bool {
 		return true
 	case content == "@no-cookie-jar", strings.HasPrefix(content, "@no-cookie-jar "):
 		return true
+	case strings.HasPrefix(content, "@assert "):
+		return true
 	default:
 		return false
 	}
@@ -310,6 +316,14 @@ func parseRequestDirective(trimmed string, request *ast.RequestBlock, lineNumber
 	case content == "@no-cookie-jar", strings.HasPrefix(content, "@no-cookie-jar "):
 		request.NoCookieJar = true
 		return applyDirectiveRemainder(request, strings.TrimSpace(strings.TrimPrefix(content, "@no-cookie-jar")), lineNumber)
+	case strings.HasPrefix(content, "@assert "):
+		assertion, err := parseAssertion(strings.TrimSpace(strings.TrimPrefix(content, "@assert")))
+		if err != nil {
+			return nil, fmt.Errorf("%d: invalid @assert: %w", lineNumber, err)
+		}
+		assertion.Pos = ast.Position{Line: lineNumber, Column: 1}
+		request.Assertions = append(request.Assertions, assertion)
+		return request, nil
 	default:
 		return request, nil
 	}
@@ -442,4 +456,179 @@ func applyDirectiveRemainder(request *ast.RequestBlock, remainder string, lineNu
 		request.Pos = ast.Position{Line: lineNumber, Column: 1}
 	}
 	return request, nil
+}
+
+func parseAssertion(spec string) (ast.Assertion, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return ast.Assertion{}, fmt.Errorf("expression cannot be empty")
+	}
+
+	subjectText, operator, expected, hasExpected, err := splitAssertionExpression(spec)
+	if err != nil {
+		return ast.Assertion{}, err
+	}
+
+	subject, path, err := parseAssertionSubject(subjectText)
+	if err != nil {
+		return ast.Assertion{}, err
+	}
+
+	assertion := ast.Assertion{
+		Subject:  subject,
+		Path:     path,
+		Operator: operator,
+		Expected: expected,
+	}
+	if err := validateAssertion(assertion, hasExpected); err != nil {
+		return ast.Assertion{}, err
+	}
+	return assertion, nil
+}
+
+func splitAssertionExpression(spec string) (string, ast.AssertionOperator, string, bool, error) {
+	if matches := unaryAssertionPattern.FindStringSubmatch(spec); len(matches) == 3 {
+		subject := strings.TrimSpace(matches[1])
+		if subject == "" {
+			return "", "", "", false, fmt.Errorf("assertion subject cannot be empty")
+		}
+		return subject, ast.AssertionOperator(matches[2]), "", false, nil
+	}
+
+	if matches := wordBinaryAssertionPattern.FindStringSubmatch(spec); len(matches) == 4 {
+		subject := strings.TrimSpace(matches[1])
+		expected := strings.TrimSpace(matches[3])
+		if subject == "" {
+			return "", "", "", false, fmt.Errorf("assertion subject cannot be empty")
+		}
+		if expected == "" {
+			return "", "", "", false, fmt.Errorf("assertion value cannot be empty")
+		}
+		return subject, ast.AssertionOperator(matches[2]), expected, true, nil
+	}
+
+	if matches := symbolBinaryAssertionPattern.FindStringSubmatch(spec); len(matches) == 4 {
+		subject := strings.TrimSpace(matches[1])
+		expected := strings.TrimSpace(matches[3])
+		if subject == "" {
+			return "", "", "", false, fmt.Errorf("assertion subject cannot be empty")
+		}
+		if expected == "" {
+			return "", "", "", false, fmt.Errorf("assertion value cannot be empty")
+		}
+		return subject, ast.AssertionOperator(matches[2]), expected, true, nil
+	}
+
+	return "", "", "", false, fmt.Errorf("expected an operator such as ==, !=, contains, or exists")
+}
+
+func parseAssertionSubject(input string) (ast.AssertionSubject, string, error) {
+	switch {
+	case input == "status":
+		return ast.AssertSubjectStatus, "", nil
+	case input == "body":
+		return ast.AssertSubjectBody, "", nil
+	case strings.HasPrefix(input, "json."):
+		path := strings.TrimSpace(strings.TrimPrefix(input, "json."))
+		if err := validateJSONPath(path); err != nil {
+			return "", "", err
+		}
+		return ast.AssertSubjectJSON, path, nil
+	case strings.HasPrefix(input, "header."):
+		name := strings.TrimSpace(strings.TrimPrefix(input, "header."))
+		if name == "" {
+			return "", "", fmt.Errorf("header name cannot be empty")
+		}
+		return ast.AssertSubjectHeader, name, nil
+	default:
+		return "", "", fmt.Errorf("unsupported assertion subject %q", input)
+	}
+}
+
+func validateAssertion(assertion ast.Assertion, hasExpected bool) error {
+	switch assertion.Operator {
+	case ast.AssertOpExists, ast.AssertOpNotExists:
+		if hasExpected || assertion.Expected != "" {
+			return fmt.Errorf("%s does not accept a comparison value", assertion.Operator)
+		}
+	default:
+		if !hasExpected || assertion.Expected == "" {
+			return fmt.Errorf("%s requires a comparison value", assertion.Operator)
+		}
+	}
+
+	switch assertion.Subject {
+	case ast.AssertSubjectStatus:
+		switch assertion.Operator {
+		case ast.AssertOpEqual, ast.AssertOpNotEqual, ast.AssertOpGreater, ast.AssertOpGreaterEqual, ast.AssertOpLess, ast.AssertOpLessEqual:
+			_, err := parseStatusCode(assertion.Expected)
+			return err
+		default:
+			return fmt.Errorf("status supports only ==, !=, >, >=, <, <=")
+		}
+	case ast.AssertSubjectBody:
+		switch assertion.Operator {
+		case ast.AssertOpEqual, ast.AssertOpNotEqual, ast.AssertOpContains, ast.AssertOpNotContains, ast.AssertOpExists, ast.AssertOpNotExists:
+			return nil
+		default:
+			return fmt.Errorf("body supports only ==, !=, contains, not_contains, exists, not_exists")
+		}
+	case ast.AssertSubjectHeader:
+		switch assertion.Operator {
+		case ast.AssertOpEqual, ast.AssertOpNotEqual, ast.AssertOpContains, ast.AssertOpNotContains, ast.AssertOpExists, ast.AssertOpNotExists:
+			return nil
+		default:
+			return fmt.Errorf("header supports only ==, !=, contains, not_contains, exists, not_exists")
+		}
+	case ast.AssertSubjectJSON:
+		switch assertion.Operator {
+		case ast.AssertOpExists, ast.AssertOpNotExists:
+			return nil
+		case ast.AssertOpEqual, ast.AssertOpNotEqual:
+			if !json.Valid([]byte(assertion.Expected)) {
+				return fmt.Errorf("json comparison value must be valid JSON")
+			}
+			return nil
+		case ast.AssertOpGreater, ast.AssertOpGreaterEqual, ast.AssertOpLess, ast.AssertOpLessEqual:
+			if _, err := parseJSONNumber(assertion.Expected); err != nil {
+				return err
+			}
+			return nil
+		default:
+			return fmt.Errorf("json supports only ==, !=, >, >=, <, <=, exists, not_exists")
+		}
+	default:
+		return fmt.Errorf("unsupported assertion subject %q", assertion.Subject)
+	}
+}
+
+func validateJSONPath(path string) error {
+	if path == "" {
+		return fmt.Errorf("json path cannot be empty")
+	}
+	for _, part := range strings.Split(path, ".") {
+		if strings.TrimSpace(part) == "" {
+			return fmt.Errorf("json path contains an empty segment")
+		}
+	}
+	return nil
+}
+
+func parseStatusCode(input string) (int, error) {
+	statusCode, err := strconv.Atoi(input)
+	if err != nil {
+		return 0, fmt.Errorf("status comparison value must be an integer")
+	}
+	if statusCode < 100 || statusCode > 599 {
+		return 0, fmt.Errorf("status code must be between 100 and 599")
+	}
+	return statusCode, nil
+}
+
+func parseJSONNumber(input string) (float64, error) {
+	var number float64
+	if err := json.Unmarshal([]byte(input), &number); err != nil {
+		return 0, fmt.Errorf("numeric json comparison value must be a JSON number")
+	}
+	return number, nil
 }

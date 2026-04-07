@@ -6,5 +6,5 @@
 
 ###
 # @name slowRequest
-# @timeout 50 ms
+# @timeout 50ms
 GET {{base}}/delay/1

@@ -199,6 +199,94 @@ func TestRealMainRunFailHTTPDoesNotRepeatHTTPErrorOnStderr(t *testing.T) {
 	}
 }
 
+func TestRealMainRunAssertionFailureDoesNotRepeatOnStderr(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":{"name":"demo"}}`))
+	}))
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	path := writeHTTPFile(t, tempDir, "assert.http", strings.TrimSpace(`
+###
+# @name check
+# @assert status == 200
+# @assert json.data.name == "other"
+GET {{base}}/check
+`))
+
+	var stdout, stderr bytes.Buffer
+	code := realMain([]string{
+		"run",
+		"--var", "base=" + server.URL,
+		path,
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr for assertion failure, got %q", stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Assertion Failures:") {
+		t.Fatalf("expected assertion failures in output, got %q", output)
+	}
+	if !strings.Contains(output, "Summary: 1 requests, 0 passed, 1 failed") {
+		t.Fatalf("expected failed summary, got %q", output)
+	}
+}
+
+func TestRealMainRunAssertionFailureSummarizesSkippedRequests(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		switch r.URL.Path {
+		case "/first":
+			_, _ = w.Write([]byte(`{"data":{"name":"demo"}}`))
+		case "/second":
+			_, _ = w.Write([]byte(`{"data":{"name":"second"}}`))
+		}
+	}))
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	path := writeHTTPFile(t, tempDir, "assert-skip.http", strings.TrimSpace(`
+###
+# @name first
+# @assert json.data.name == "other"
+GET {{base}}/first
+
+###
+# @name second
+GET {{base}}/second
+`))
+
+	var stdout, stderr bytes.Buffer
+	code := realMain([]string{
+		"run",
+		"--var", "base=" + server.URL,
+		path,
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr for assertion failure, got %q", stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Summary: 1/2 executed, 0 passed, 1 failed, 1 skipped") {
+		t.Fatalf("expected skipped summary, got %q", output)
+	}
+	if strings.Contains(output, "2. second") {
+		t.Fatalf("did not expect second request output, got %q", output)
+	}
+}
+
 func writeHTTPFile(t *testing.T, dir, name, body string) string {
 	t.Helper()
 

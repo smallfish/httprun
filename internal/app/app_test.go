@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -265,6 +266,192 @@ func TestRunNameMissingRequest(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `request "doesNotExist" not found`) {
 		t.Fatalf("unexpected error %v", err)
+	}
+}
+
+func TestRunAssertionsFailRequestAndShowDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"hello","data":{"items":[{"name":"demo"}]}}`))
+	}))
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	httpPath := filepath.Join(tempDir, "assert.http")
+	if err := os.WriteFile(httpPath, []byte(strings.TrimSpace(`
+###
+# @name assertDemo
+# @assert status == 200
+# @assert body contains hello
+# @assert json.data.items.0.name == "other"
+GET {{base}}/check
+`)), 0o644); err != nil {
+		t.Fatalf("write http file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	stats, err := Run(context.Background(), &stdout, RunOptions{
+		Path: httpPath,
+		CLIOverrides: map[string]string{
+			"base": server.URL,
+		},
+		Timeout: 5 * time.Second,
+	})
+	if err == nil {
+		t.Fatalf("expected assertion failure")
+	}
+
+	if !strings.Contains(err.Error(), `expected json.data.items.0.name == "other", got "demo"`) {
+		t.Fatalf("unexpected error %v", err)
+	}
+	if stats.Executed != 1 || stats.Failed != 1 || stats.Passed != 0 {
+		t.Fatalf("unexpected stats %+v", stats)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Assertion Failures:") {
+		t.Fatalf("expected assertion failures in output, got %q", output)
+	}
+	if !strings.Contains(output, `"message":"hello"`) {
+		t.Fatalf("expected response body in output, got %q", output)
+	}
+}
+
+func TestRunAssertionsPassAcrossSubjectsAndOperators(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/status":
+			w.WriteHeader(http.StatusNoContent)
+		case "/text":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("hello"))
+		case "/json":
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Trace-Id", "trace-123")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":{"name":"demo","count":2,"enabled":true,"items":["one","two"]}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	httpPath := filepath.Join(tempDir, "assert-pass.http")
+	if err := os.WriteFile(httpPath, []byte(strings.TrimSpace(`
+###
+# @name statusNoBody
+# @assert status == 204
+# @assert body not_exists
+GET {{base}}/status
+
+###
+# @name plainText
+# @assert status != 500
+# @assert body exists
+# @assert body == hello
+# @assert body not_contains error
+GET {{base}}/text
+
+###
+# @name jsonAndHeaders
+# @assert status >= 200
+# @assert status < 300
+# @assert header.X-Trace-Id exists
+# @assert header.X-Trace-Id == trace-123
+# @assert header.Content-Type contains application/json
+# @assert header.X-Missing not_exists
+# @assert json.data.name == "demo"
+# @assert json.data.name != "other"
+# @assert json.data.count >= 2
+# @assert json.data.count <= 2
+# @assert json.data.items exists
+# @assert json.data.missing not_exists
+GET {{base}}/json
+`)), 0o644); err != nil {
+		t.Fatalf("write http file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	stats, err := Run(context.Background(), &stdout, RunOptions{
+		Path: httpPath,
+		CLIOverrides: map[string]string{
+			"base": server.URL,
+		},
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if stats.Selected != 3 || stats.Executed != 3 || stats.Passed != 3 || stats.Failed != 0 {
+		t.Fatalf("unexpected stats %+v", stats)
+	}
+
+	output := stdout.String()
+	if strings.Contains(output, "Assertion Failures:") {
+		t.Fatalf("did not expect assertion failures, got %q", output)
+	}
+	if strings.Count(output, "204 No Content") != 1 || strings.Count(output, "200 OK") != 2 {
+		t.Fatalf("unexpected output %q", output)
+	}
+}
+
+func TestRunAssertionFailureStopsLaterRequests(t *testing.T) {
+	var calls []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		switch r.URL.Path {
+		case "/first":
+			_, _ = w.Write([]byte(`{"value":"wrong"}`))
+		case "/second":
+			_, _ = w.Write([]byte(`{"value":"second"}`))
+		default:
+			_, _ = w.Write([]byte(`{"value":"unknown"}`))
+		}
+	}))
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	httpPath := filepath.Join(tempDir, "assert-stop.http")
+	if err := os.WriteFile(httpPath, []byte(strings.TrimSpace(`
+###
+# @name first
+# @assert json.value == "expected"
+GET {{base}}/first
+
+###
+# @name second
+GET {{base}}/second
+`)), 0o644); err != nil {
+		t.Fatalf("write http file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	stats, err := Run(context.Background(), &stdout, RunOptions{
+		Path: httpPath,
+		CLIOverrides: map[string]string{
+			"base": server.URL,
+		},
+		Timeout: 5 * time.Second,
+	})
+	if err == nil {
+		t.Fatalf("expected assertion failure")
+	}
+	if !strings.Contains(err.Error(), `expected json.value == "expected", got "wrong"`) {
+		t.Fatalf("unexpected error %v", err)
+	}
+	if stats.Selected != 2 || stats.Executed != 1 || stats.Passed != 0 || stats.Failed != 1 {
+		t.Fatalf("unexpected stats %+v", stats)
+	}
+	if len(calls) != 1 || calls[0] != "/first" {
+		t.Fatalf("expected only first request to run, got %v", calls)
+	}
+	if strings.Contains(stdout.String(), "2. second") {
+		t.Fatalf("expected second request output to be skipped, got %q", stdout.String())
 	}
 }
 

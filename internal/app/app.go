@@ -6,8 +6,10 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/smallfish/httprun/internal/assert"
 	"github.com/smallfish/httprun/internal/ast"
 	"github.com/smallfish/httprun/internal/envfile"
 	"github.com/smallfish/httprun/internal/executor"
@@ -54,6 +56,26 @@ func (e HTTPStatusError) Error() string {
 	return fmt.Sprintf("request failed with %s", e.Status)
 }
 
+type AssertionError struct {
+	RequestName string
+	Failures    []string
+}
+
+func (e AssertionError) Error() string {
+	if len(e.Failures) == 0 {
+		if e.RequestName != "" {
+			return fmt.Sprintf("%s failed assertions", e.RequestName)
+		}
+		return "request failed assertions"
+	}
+
+	message := strings.Join(e.Failures, "; ")
+	if e.RequestName != "" {
+		return fmt.Sprintf("%s failed assertions: %s", e.RequestName, message)
+	}
+	return fmt.Sprintf("request failed assertions: %s", message)
+}
+
 func Run(ctx context.Context, stdout io.Writer, options RunOptions) (RunStats, error) {
 	doc, variables, err := load(options.Path, options.EnvironmentName, options.CLIOverrides)
 	if err != nil {
@@ -89,14 +111,23 @@ func Run(ctx context.Context, stdout io.Writer, options RunOptions) (RunStats, e
 			return stats, qualifyPath(doc.Path, fmt.Errorf("line %d: %w", request.Pos.Line, err))
 		}
 		stats.Executed++
-		if err := output.WriteResult(stdout, idx+1, result, options.Verbose); err != nil {
-			return stats, err
-		}
+		assertionFailures := assert.Check(result.Response, result.Body, request.Assertions)
 
-		if result.Response.StatusCode >= http.StatusBadRequest {
+		if result.Response.StatusCode >= http.StatusBadRequest || len(assertionFailures) > 0 {
 			stats.Failed++
 		} else {
 			stats.Passed++
+		}
+
+		if err := output.WriteResult(stdout, idx+1, result, options.Verbose, assertionFailures); err != nil {
+			return stats, err
+		}
+
+		if len(assertionFailures) > 0 {
+			return stats, AssertionError{
+				RequestName: request.Name,
+				Failures:    assertionFailures,
+			}
 		}
 
 		if options.FailOnHTTPError && result.Response.StatusCode >= http.StatusBadRequest {

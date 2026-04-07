@@ -8,6 +8,8 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo "Validate example files"
 "$BIN_PATH" validate examples/demo.http
+"$BIN_PATH" validate examples/assertions.http
+"$BIN_PATH" validate examples/assertions_failure.http
 "$BIN_PATH" validate --env dev examples/all_methods.http
 "$BIN_PATH" validate examples/request_options.http examples/timeout.http
 "$BIN_PATH" validate --jobs 2 examples/demo.http examples/request_options.http
@@ -15,6 +17,20 @@ echo "Validate example files"
 echo "Run direct example"
 "$BIN_PATH" run --name ping examples/demo.http >"$TMP_DIR/ping.out"
 grep -q "200 OK" "$TMP_DIR/ping.out"
+
+echo "Run assertion example"
+"$BIN_PATH" run examples/assertions.http >"$TMP_DIR/assert.out"
+grep -q "Summary: 4 requests, 4 passed" "$TMP_DIR/assert.out"
+grep -q "assertHeaders" "$TMP_DIR/assert.out"
+
+echo "Verify assertion failure behavior"
+if "$BIN_PATH" run examples/assertions_failure.http >"$TMP_DIR/assert-fail.out" 2>"$TMP_DIR/assert-fail.err"; then
+  echo "expected assertion failure example to fail"
+  exit 1
+fi
+test ! -s "$TMP_DIR/assert-fail.err"
+grep -q "Assertion Failures:" "$TMP_DIR/assert-fail.out"
+grep -q "Summary: 1/2 executed, 0 passed, 1 failed, 1 skipped" "$TMP_DIR/assert-fail.out"
 
 echo "Run env + external body example"
 "$BIN_PATH" run --env dev --name createItem examples/all_methods.http >"$TMP_DIR/create.out"
