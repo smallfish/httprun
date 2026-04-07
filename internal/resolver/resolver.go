@@ -123,11 +123,11 @@ func resolveString(input string, variables map[string]string) (string, error) {
 		}
 
 		name := strings.TrimSpace(groups[1])
-		if builtin, ok := builtinVariable(name); ok {
-			return builtin
-		}
 		if value, ok := variables[name]; ok {
 			return value
+		}
+		if builtin, ok := builtinVariable(name); ok {
+			return builtin
 		}
 
 		unresolved = append(unresolved, name)

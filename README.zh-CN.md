@@ -178,7 +178,7 @@ Content-Type: application/json
 
 ### 内容放在哪里
 
-- 文件内变量、请求名字、请求前注释指令、断言，都写在请求行之前。
+- 文件内变量、请求名字、请求前注释指令、响应捕获、断言，都写在请求行之前。
 - 请求头写在请求行之后、第一行空行之前。
 - 第一行空行之后的内容会被当成请求体。
 - 如果在请求体后面继续写内容，这些内容仍然会被当成请求体，而不是新的指令。
@@ -208,6 +208,42 @@ GET {{base}}/slow
 | `# @connection-timeout 2s` | 覆盖当前请求的连接超时时间 |
 | `# @no-redirect` | 不自动跟随重定向 |
 | `# @no-cookie-jar` | 不把这次响应里的 Cookie 写回共享的 Cookie 存储 |
+
+## RESPONSE CAPTURE
+
+`httprun` 支持在请求执行成功后，把响应里的值写回运行时变量，供后续请求继续使用。
+
+```http
+@test_id = 1
+
+###
+# @name create
+# @capture test_id = json.data.id
+# @capture test_name = json.data.name
+POST {{base}}/resource
+Content-Type: application/json
+
+{"name":"demo"}
+
+###
+GET {{base}}/resource/{{test_id}}
+X-Name: {{test_name}}
+```
+
+规则：
+
+- `# @capture <var> = <source>` 只能写在请求行之前。
+- capture 只影响当前 `.http` 文件里后续请求的变量解析。
+- capture 不会修改源文件里的 `@var = ...` 声明，只会覆盖当前执行过程中的运行时变量值。
+- 如果 capture 失败，当前文件会立刻停止，后面的请求不会继续执行。
+- 这是 `httprun` 的 CLI 扩展能力。GoLand/JetBrains HTTP Client 一般会把它当普通注释忽略，不会破坏原有用例，但也不会执行 capture 逻辑。
+
+当前支持的 `<source>`：
+
+- `json.<path>`，例如 `json.data.id`
+- `header.<name>`，例如 `header.X-Trace-Id`
+- `status`
+- `body`
 
 ## ASSERTIONS
 
@@ -265,11 +301,12 @@ httprun run --env dev path/to/demo.http
 
 变量覆盖顺序从高到低如下：
 
-1. CLI `--var`
-2. `http-client.env.json`
-3. `http-client.private.env.json`
-4. 文件内变量，例如 `@base = ...`
-5. 内置变量
+1. 运行时 `@capture`
+2. CLI `--var`
+3. `http-client.env.json`
+4. `http-client.private.env.json`
+5. 文件内变量，例如 `@base = ...`
+6. 内置变量
 
 ## EXECUTION RULES
 
@@ -298,6 +335,7 @@ httprun run --env dev path/to/demo.http
 更多示例：
 
 - [examples/all_methods.http](./examples/all_methods.http)：常见 HTTP 方法、变量、环境变量文件、外部请求体文件
+- [examples/capture.http](./examples/capture.http)：请求执行后提取响应字段，覆盖运行时变量供后续请求使用
 - [examples/assertions.http](./examples/assertions.http)：成功断言示例，覆盖 `status`、`body`、`json.*`、`header.*` 和多种比较方式
 - [examples/assertions_failure.http](./examples/assertions_failure.http)：故意失败的断言示例，展示非零退出码和后续请求被跳过
 - [examples/request_options.http](./examples/request_options.http)：`@no-redirect` 和 `@no-cookie-jar`
@@ -318,7 +356,6 @@ go run ./cmd/httprun run examples/assertions_failure.http
 
 - pre-request 脚本
 - response handler 脚本
-- 从前一个响应中提取变量
 - `client.*` 之类的 JavaScript API
 - WebSocket
 - GraphQL 专用语法

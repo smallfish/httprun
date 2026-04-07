@@ -178,7 +178,7 @@ Notes:
 
 ### Placement rules
 
-- File variables, request names, request directives, and assertions must appear before the request line.
+- File variables, request names, request directives, response captures, and assertions must appear before the request line.
 - Headers go after the request line and before the first blank line.
 - The request body starts after the first blank line.
 - Anything written after the request body is still treated as body content, not as a new directive.
@@ -208,6 +208,42 @@ Some directives can also share the same line as the request:
 | `# @connection-timeout 2s` | Override the connection timeout for the current request |
 | `# @no-redirect` | Do not follow redirects automatically |
 | `# @no-cookie-jar` | Do not write cookies from this response back into the shared cookie store |
+
+## RESPONSE CAPTURE
+
+`httprun` can capture values from one response and write them back into runtime variables for later requests in the same file.
+
+```http
+@test_id = 1
+
+###
+# @name create
+# @capture test_id = json.data.id
+# @capture test_name = json.data.name
+POST {{base}}/resource
+Content-Type: application/json
+
+{"name":"demo"}
+
+###
+GET {{base}}/resource/{{test_id}}
+X-Name: {{test_name}}
+```
+
+Rules:
+
+- `# @capture <var> = <source>` must appear before the request line.
+- Captured values affect only later requests in the same `.http` file.
+- Capture does not rewrite the source file's `@var = ...` declaration; it only overrides the runtime variable value for the current execution.
+- If any capture fails, execution of the current file stops immediately and later requests are skipped.
+- This is a `httprun` CLI extension. GoLand/JetBrains HTTP Client will usually ignore it as a normal comment, so existing files keep working there, but the capture logic itself is not executed by the IDE.
+
+Supported `<source>` values:
+
+- `json.<path>`, for example `json.data.id`
+- `header.<name>`, for example `header.X-Trace-Id`
+- `status`
+- `body`
 
 ## ASSERTIONS
 
@@ -265,11 +301,12 @@ httprun run --env dev path/to/demo.http
 
 Variable precedence from highest to lowest:
 
-1. CLI `--var`
-2. `http-client.env.json`
-3. `http-client.private.env.json`
-4. File variables such as `@base = ...`
-5. Built-in variables
+1. Runtime `@capture`
+2. CLI `--var`
+3. `http-client.env.json`
+4. `http-client.private.env.json`
+5. File variables such as `@base = ...`
+6. Built-in variables
 
 ## EXECUTION RULES
 
@@ -298,6 +335,7 @@ Primary example:
 Additional examples:
 
 - [`examples/all_methods.http`](./examples/all_methods.http): common HTTP methods, variables, environment files, external request body files
+- [`examples/capture.http`](./examples/capture.http): capture response fields after one request and reuse them in later requests
 - [`examples/assertions.http`](./examples/assertions.http): successful assertions across `status`, `body`, `json.*`, `header.*`, and multiple operators
 - [`examples/assertions_failure.http`](./examples/assertions_failure.http): intentional assertion failure, non-zero exit, and skipped follow-up requests
 - [`examples/request_options.http`](./examples/request_options.http): `@no-redirect` and `@no-cookie-jar`
@@ -318,7 +356,6 @@ go run ./cmd/httprun run examples/assertions_failure.http
 
 - Pre-request scripts
 - Response handler scripts
-- Extracting variables from previous responses
 - JavaScript APIs such as `client.*`
 - WebSocket
 - GraphQL-specific syntax

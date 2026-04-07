@@ -455,6 +455,189 @@ GET {{base}}/second
 	}
 }
 
+func TestRunCapturesResponseValuesForLaterRequests(t *testing.T) {
+	var captured []capturedRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		captured = append(captured, capturedRequest{
+			Method: r.Method,
+			Path:   r.URL.Path,
+			Header: r.Header.Clone(),
+			Body:   string(body),
+		})
+
+		switch r.URL.Path {
+		case "/resources":
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Trace-Id", "trace-123")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"data":{"id":42,"name":"demo"}}`))
+		case "/resources/42":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	httpPath := filepath.Join(tempDir, "capture.http")
+	if err := os.WriteFile(httpPath, []byte(strings.TrimSpace(`
+@test_id = 1
+
+###
+# @name create
+# @capture test_id = json.data.id
+# @capture test_name = json.data.name
+# @capture trace_id = header.X-Trace-Id
+# @capture last_status = status
+POST {{base}}/resources
+Content-Type: application/json
+
+{"name":"demo"}
+
+###
+# @name useCapture
+GET {{base}}/resources/{{test_id}}
+X-Name: {{test_name}}
+X-Trace: {{trace_id}}
+X-Status: {{last_status}}
+`)), 0o644); err != nil {
+		t.Fatalf("write http file: %v", err)
+	}
+
+	if err := Validate(ValidateOptions{
+		Path: httpPath,
+		CLIOverrides: map[string]string{
+			"base": server.URL,
+		},
+	}); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	stats, err := Run(context.Background(), &stdout, RunOptions{
+		Path: httpPath,
+		CLIOverrides: map[string]string{
+			"base": server.URL,
+		},
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if stats.Selected != 2 || stats.Executed != 2 || stats.Passed != 2 || stats.Failed != 0 {
+		t.Fatalf("unexpected stats %+v", stats)
+	}
+	if len(captured) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(captured))
+	}
+	if captured[1].Path != "/resources/42" {
+		t.Fatalf("expected captured id in path, got %q", captured[1].Path)
+	}
+	if got := captured[1].Header.Get("X-Name"); got != "demo" {
+		t.Fatalf("expected captured name in header, got %q", got)
+	}
+	if got := captured[1].Header.Get("X-Trace"); got != "trace-123" {
+		t.Fatalf("expected captured trace id in header, got %q", got)
+	}
+	if got := captured[1].Header.Get("X-Status"); got != "201" {
+		t.Fatalf("expected captured status in header, got %q", got)
+	}
+}
+
+func TestRunNameDoesNotBackfillCaptureDependencies(t *testing.T) {
+	tempDir := t.TempDir()
+	httpPath := filepath.Join(tempDir, "capture-name.http")
+	if err := os.WriteFile(httpPath, []byte(strings.TrimSpace(`
+###
+# @name create
+# @capture test_id = json.data.id
+POST {{base}}/resources
+
+###
+# @name useCapture
+GET {{base}}/resources/{{test_id}}
+`)), 0o644); err != nil {
+		t.Fatalf("write http file: %v", err)
+	}
+
+	_, err := Run(context.Background(), &bytes.Buffer{}, RunOptions{
+		Path:        httpPath,
+		RequestName: "useCapture",
+		CLIOverrides: map[string]string{
+			"base": "https://example.com",
+		},
+		Timeout: 5 * time.Second,
+	})
+	if err == nil {
+		t.Fatalf("expected missing capture dependency error")
+	}
+	if !strings.Contains(err.Error(), `undefined variable "test_id"`) {
+		t.Fatalf("unexpected error %v", err)
+	}
+}
+
+func TestRunCaptureFailureStopsLaterRequests(t *testing.T) {
+	var calls []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"data":{}}`))
+	}))
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	httpPath := filepath.Join(tempDir, "capture-fail.http")
+	if err := os.WriteFile(httpPath, []byte(strings.TrimSpace(`
+###
+# @name create
+# @capture test_id = json.data.id
+POST {{base}}/resources
+
+###
+# @name useCapture
+GET {{base}}/resources/{{test_id}}
+`)), 0o644); err != nil {
+		t.Fatalf("write http file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	stats, err := Run(context.Background(), &stdout, RunOptions{
+		Path: httpPath,
+		CLIOverrides: map[string]string{
+			"base": server.URL,
+		},
+		Timeout: 5 * time.Second,
+	})
+	if err == nil {
+		t.Fatalf("expected capture failure")
+	}
+	if !strings.Contains(err.Error(), `capture "test_id": "json.data.id" not found`) {
+		t.Fatalf("unexpected error %v", err)
+	}
+	if stats.Selected != 2 || stats.Executed != 1 || stats.Passed != 0 || stats.Failed != 1 {
+		t.Fatalf("unexpected stats %+v", stats)
+	}
+	if len(calls) != 1 || calls[0] != "/resources" {
+		t.Fatalf("expected only first request to run, got %v", calls)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "Capture Failures:") {
+		t.Fatalf("expected capture failures in output, got %q", output)
+	}
+	if strings.Contains(output, "2. useCapture") {
+		t.Fatalf("expected later request to be skipped, got %q", output)
+	}
+}
+
 func assertRequest(t *testing.T, got capturedRequest, wantMethod, wantPath, wantQuery, wantBody string, wantHeaders map[string]string) {
 	t.Helper()
 

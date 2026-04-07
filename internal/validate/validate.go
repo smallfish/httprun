@@ -39,9 +39,13 @@ func Document(doc ast.Document, requestName string, variables map[string]string)
 		baseDir = filepath.Dir(doc.Path)
 	}
 
+	runtimeVars := cloneVariables(variables)
 	for _, request := range selected {
-		if _, err := resolver.ResolveRequest(request, variables, resolver.ResolveOptions{BaseDir: baseDir}); err != nil {
+		if _, err := resolver.ResolveRequest(request, runtimeVars, resolver.ResolveOptions{BaseDir: baseDir}); err != nil {
 			issues = append(issues, err.Error())
+		}
+		for _, capture := range request.Captures {
+			runtimeVars[capture.Name] = "__captured__"
 		}
 	}
 
@@ -49,6 +53,14 @@ func Document(doc ast.Document, requestName string, variables map[string]string)
 		return errors.New(strings.Join(issues, "\n"))
 	}
 	return nil
+}
+
+func cloneVariables(input map[string]string) map[string]string {
+	cloned := make(map[string]string, len(input))
+	for key, value := range input {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func SelectRequests(requests []ast.RequestBlock, requestName string) ([]ast.RequestBlock, error) {

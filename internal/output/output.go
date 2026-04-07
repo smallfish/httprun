@@ -14,7 +14,7 @@ import (
 	"github.com/smallfish/httprun/internal/executor"
 )
 
-func WriteResult(w io.Writer, index int, result executor.Result, verbose bool, assertionFailures []string) error {
+func WriteResult(w io.Writer, index int, result executor.Result, verbose bool, assertionFailures, captureFailures []string) error {
 	title := result.Request.Name
 	if title == "" {
 		title = fmt.Sprintf("%s %s", result.Request.Method, compactURL(result.Request.URL))
@@ -56,6 +56,11 @@ func WriteResult(w io.Writer, index int, result executor.Result, verbose bool, a
 			return err
 		}
 	}
+	if len(captureFailures) > 0 {
+		if err := writeListSection(w, "Capture Failures", captureFailures); err != nil {
+			return err
+		}
+	}
 
 	if verbose {
 		if err := writeHeaderSection(w, "Response Headers", result.Response.Header); err != nil {
@@ -66,7 +71,7 @@ func WriteResult(w io.Writer, index int, result executor.Result, verbose bool, a
 				return err
 			}
 		}
-	} else if failedResponse(result.Response) || len(assertionFailures) > 0 {
+	} else if failedResponse(result.Response) || len(assertionFailures) > 0 || len(captureFailures) > 0 {
 		body, truncated := formatFailedBody(result.Response.Header, result.Body)
 		if body != "" {
 			label := "Response Body"

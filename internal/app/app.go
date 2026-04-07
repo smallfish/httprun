@@ -11,6 +11,7 @@ import (
 
 	"github.com/smallfish/httprun/internal/assert"
 	"github.com/smallfish/httprun/internal/ast"
+	"github.com/smallfish/httprun/internal/capture"
 	"github.com/smallfish/httprun/internal/envfile"
 	"github.com/smallfish/httprun/internal/executor"
 	"github.com/smallfish/httprun/internal/output"
@@ -76,6 +77,26 @@ func (e AssertionError) Error() string {
 	return fmt.Sprintf("request failed assertions: %s", message)
 }
 
+type CaptureError struct {
+	RequestName string
+	Failures    []string
+}
+
+func (e CaptureError) Error() string {
+	if len(e.Failures) == 0 {
+		if e.RequestName != "" {
+			return fmt.Sprintf("%s failed captures", e.RequestName)
+		}
+		return "request failed captures"
+	}
+
+	message := strings.Join(e.Failures, "; ")
+	if e.RequestName != "" {
+		return fmt.Sprintf("%s failed captures: %s", e.RequestName, message)
+	}
+	return fmt.Sprintf("request failed captures: %s", message)
+}
+
 func Run(ctx context.Context, stdout io.Writer, options RunOptions) (RunStats, error) {
 	doc, variables, err := load(options.Path, options.EnvironmentName, options.CLIOverrides)
 	if err != nil {
@@ -91,6 +112,7 @@ func Run(ctx context.Context, stdout io.Writer, options RunOptions) (RunStats, e
 		return RunStats{}, qualifyPath(doc.Path, err)
 	}
 	stats := RunStats{Selected: len(requests)}
+	runtimeVars := cloneVariables(variables)
 
 	execConfig := executor.Config{Timeout: options.Timeout}
 	session, err := executor.NewSession(execConfig)
@@ -99,7 +121,7 @@ func Run(ctx context.Context, stdout io.Writer, options RunOptions) (RunStats, e
 	}
 	resolveOptions := resolver.ResolveOptions{BaseDir: filepath.Dir(doc.Path)}
 	for idx, request := range requests {
-		resolved, err := resolver.ResolveRequest(request, variables, resolveOptions)
+		resolved, err := resolver.ResolveRequest(request, runtimeVars, resolveOptions)
 		if err != nil {
 			return stats, qualifyPath(doc.Path, err)
 		}
@@ -112,14 +134,15 @@ func Run(ctx context.Context, stdout io.Writer, options RunOptions) (RunStats, e
 		}
 		stats.Executed++
 		assertionFailures := assert.Check(result.Response, result.Body, request.Assertions)
+		capturedValues, captureFailures := capture.Apply(result.Response, result.Body, request.Captures)
 
-		if result.Response.StatusCode >= http.StatusBadRequest || len(assertionFailures) > 0 {
+		if result.Response.StatusCode >= http.StatusBadRequest || len(assertionFailures) > 0 || len(captureFailures) > 0 {
 			stats.Failed++
 		} else {
 			stats.Passed++
 		}
 
-		if err := output.WriteResult(stdout, idx+1, result, options.Verbose, assertionFailures); err != nil {
+		if err := output.WriteResult(stdout, idx+1, result, options.Verbose, assertionFailures, captureFailures); err != nil {
 			return stats, err
 		}
 
@@ -128,6 +151,16 @@ func Run(ctx context.Context, stdout io.Writer, options RunOptions) (RunStats, e
 				RequestName: request.Name,
 				Failures:    assertionFailures,
 			}
+		}
+		if len(captureFailures) > 0 {
+			return stats, CaptureError{
+				RequestName: request.Name,
+				Failures:    captureFailures,
+			}
+		}
+
+		for key, value := range capturedValues {
+			runtimeVars[key] = value
 		}
 
 		if options.FailOnHTTPError && result.Response.StatusCode >= http.StatusBadRequest {
@@ -171,6 +204,14 @@ func load(path, envName string, overrides map[string]string) (ast.Document, map[
 
 	variables := resolver.MergeVariables(doc.Variables, loadedEnv.Public, loadedEnv.Secret, overrides)
 	return doc, variables, nil
+}
+
+func cloneVariables(input map[string]string) map[string]string {
+	cloned := make(map[string]string, len(input))
+	for key, value := range input {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func qualifyPath(path string, err error) error {

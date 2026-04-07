@@ -96,17 +96,19 @@ GET https://example.com/items
 
 func TestParseRequestDirectives(t *testing.T) {
 	input := `
-###
-# @name tuned
-# @timeout 150ms
-# @connection-timeout 2s
-# @no-redirect
-# @no-cookie-jar
-# @assert status == 200
-# @assert body contains "ok"
-# @assert json.data.user.name == "demo"
-# @assert header.Content-Type exists
-GET https://example.com/items
+	###
+	# @name tuned
+	# @timeout 150ms
+	# @connection-timeout 2s
+	# @no-redirect
+	# @no-cookie-jar
+	# @capture itemId = json.data.id
+	# @capture traceId = header.X-Trace-Id
+	# @assert status == 200
+	# @assert body contains "ok"
+	# @assert json.data.user.name == "demo"
+	# @assert header.Content-Type exists
+	GET https://example.com/items
 `
 
 	doc, err := Parse("demo.http", input)
@@ -126,6 +128,15 @@ GET https://example.com/items
 	}
 	if !request.NoCookieJar {
 		t.Fatalf("expected no cookie jar directive")
+	}
+	if len(request.Captures) != 2 {
+		t.Fatalf("expected 2 captures, got %d", len(request.Captures))
+	}
+	if request.Captures[0].Name != "itemId" || request.Captures[0].Subject != ast.CaptureSubjectJSON || request.Captures[0].Path != "data.id" {
+		t.Fatalf("unexpected first capture %+v", request.Captures[0])
+	}
+	if request.Captures[1].Name != "traceId" || request.Captures[1].Subject != ast.CaptureSubjectHeader || request.Captures[1].Path != "X-Trace-Id" {
+		t.Fatalf("unexpected second capture %+v", request.Captures[1])
 	}
 	if len(request.Assertions) != 4 {
 		t.Fatalf("expected 4 assertions, got %d", len(request.Assertions))
@@ -357,6 +368,97 @@ func TestParseRejectsInvalidAssertionForms(t *testing.T) {
 			name:   "exists with extra value",
 			line:   "# @assert body exists hello",
 			substr: "expected an operator such as ==",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := "###\n" + tt.line + "\nGET https://example.com/items\n"
+			_, err := Parse("demo.http", input)
+			if err == nil {
+				t.Fatalf("expected parse error")
+			}
+			if !strings.Contains(err.Error(), tt.substr) {
+				t.Fatalf("expected error containing %q, got %q", tt.substr, err.Error())
+			}
+		})
+	}
+}
+
+func TestParseSupportsCaptureSources(t *testing.T) {
+	input := `
+###
+# @capture statusCode = status
+# @capture rawBody = body
+# @capture itemId = json.data.id
+# @capture traceId = header.X-Trace-Id
+GET https://example.com/items
+`
+
+	doc, err := Parse("demo.http", input)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	captures := doc.Requests[0].Captures
+	if len(captures) != 4 {
+		t.Fatalf("expected 4 captures, got %d", len(captures))
+	}
+
+	want := []ast.Capture{
+		{Name: "statusCode", Subject: ast.CaptureSubjectStatus},
+		{Name: "rawBody", Subject: ast.CaptureSubjectBody},
+		{Name: "itemId", Subject: ast.CaptureSubjectJSON, Path: "data.id"},
+		{Name: "traceId", Subject: ast.CaptureSubjectHeader, Path: "X-Trace-Id"},
+	}
+
+	for idx, capture := range captures {
+		if capture.Name != want[idx].Name || capture.Subject != want[idx].Subject || capture.Path != want[idx].Path {
+			t.Fatalf("unexpected capture %d: %+v", idx, capture)
+		}
+	}
+}
+
+func TestParseRejectsInvalidCaptureForms(t *testing.T) {
+	tests := []struct {
+		name   string
+		line   string
+		substr string
+	}{
+		{
+			name:   "missing equals",
+			line:   "# @capture test_id json.data.id",
+			substr: "expected target = source",
+		},
+		{
+			name:   "empty target",
+			line:   "# @capture = json.data.id",
+			substr: "target variable cannot be empty",
+		},
+		{
+			name:   "whitespace target",
+			line:   "# @capture test id = json.data.id",
+			substr: "target variable cannot contain whitespace",
+		},
+		{
+			name:   "empty source",
+			line:   "# @capture test_id = ",
+			substr: "capture source cannot be empty",
+		},
+		{
+			name:   "bad json path",
+			line:   "# @capture test_id = json.",
+			substr: "json path cannot be empty",
+		},
+		{
+			name:   "bad header name",
+			line:   "# @capture trace = header.",
+			substr: "header name cannot be empty",
+		},
+		{
+			name:   "unsupported source",
+			line:   "# @capture trace = cookie.session",
+			substr: `unsupported capture source "cookie.session"`,
 		},
 	}
 

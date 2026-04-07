@@ -47,6 +47,25 @@ func TestResolveBuiltins(t *testing.T) {
 	}
 }
 
+func TestResolveVariablesOverrideBuiltins(t *testing.T) {
+	request := ast.RequestBlock{
+		Method: "GET",
+		URL:    "https://example.com/{{$uuid}}/{{$timestamp}}",
+	}
+
+	resolved, err := ResolveRequest(request, map[string]string{
+		"$uuid":      "custom-uuid",
+		"$timestamp": "12345",
+	}, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveRequest() error = %v", err)
+	}
+
+	if got := resolved.URL; got != "https://example.com/custom-uuid/12345" {
+		t.Fatalf("unexpected url %q", got)
+	}
+}
+
 func TestResolveBodyFromFile(t *testing.T) {
 	tempDir := t.TempDir()
 	bodyPath := filepath.Join(tempDir, "payload.json")

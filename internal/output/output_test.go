@@ -24,7 +24,7 @@ func TestWriteResultCompactOutput(t *testing.T) {
 	}
 
 	var buffer bytes.Buffer
-	if err := WriteResult(&buffer, 1, result, false, nil); err != nil {
+	if err := WriteResult(&buffer, 1, result, false, nil, nil); err != nil {
 		t.Fatalf("WriteResult() error = %v", err)
 	}
 
@@ -67,7 +67,7 @@ func TestWriteResultVerboseOutputIsStableAndDetailed(t *testing.T) {
 	}
 
 	var buffer bytes.Buffer
-	if err := WriteResult(&buffer, 2, result, true, nil); err != nil {
+	if err := WriteResult(&buffer, 2, result, true, nil, nil); err != nil {
 		t.Fatalf("WriteResult() error = %v", err)
 	}
 
@@ -110,7 +110,7 @@ func TestWriteResultCompactOutputIncludesFailedTextBody(t *testing.T) {
 	}
 
 	var buffer bytes.Buffer
-	if err := WriteResult(&buffer, 2, result, false, nil); err != nil {
+	if err := WriteResult(&buffer, 2, result, false, nil, nil); err != nil {
 		t.Fatalf("WriteResult() error = %v", err)
 	}
 
@@ -141,7 +141,7 @@ func TestWriteResultCompactOutputSkipsFailedBinaryBody(t *testing.T) {
 	}
 
 	var buffer bytes.Buffer
-	if err := WriteResult(&buffer, 1, result, false, nil); err != nil {
+	if err := WriteResult(&buffer, 1, result, false, nil, nil); err != nil {
 		t.Fatalf("WriteResult() error = %v", err)
 	}
 
@@ -170,7 +170,7 @@ func TestWriteResultCompactOutputIncludesAssertionFailuresAndBody(t *testing.T) 
 	}
 
 	var buffer bytes.Buffer
-	if err := WriteResult(&buffer, 1, result, false, []string{`line 4: expected json.name == "other", got "demo"`}); err != nil {
+	if err := WriteResult(&buffer, 1, result, false, []string{`line 4: expected json.name == "other", got "demo"`}, nil); err != nil {
 		t.Fatalf("WriteResult() error = %v", err)
 	}
 
@@ -180,5 +180,37 @@ func TestWriteResultCompactOutputIncludesAssertionFailuresAndBody(t *testing.T) 
 	}
 	if !strings.Contains(output, "Response Body:\n     {\"name\":\"demo\"}") {
 		t.Fatalf("expected response body for assertion failure, got %q", output)
+	}
+}
+
+func TestWriteResultCompactOutputIncludesCaptureFailuresAndBody(t *testing.T) {
+	result := executor.Result{
+		Request: resolver.ResolvedRequest{
+			Name:   "create-resource",
+			Method: http.MethodPost,
+			URL:    "http://127.0.0.1:28080/resources",
+		},
+		Response: &http.Response{
+			Status:     "201 Created",
+			StatusCode: http.StatusCreated,
+			Header: http.Header{
+				"Content-Type": []string{"application/json"},
+			},
+		},
+		Body:     []byte(`{"data":{}}`),
+		Duration: 8 * time.Millisecond,
+	}
+
+	var buffer bytes.Buffer
+	if err := WriteResult(&buffer, 1, result, false, nil, []string{`line 3: capture "test_id": "json.data.id" not found`}); err != nil {
+		t.Fatalf("WriteResult() error = %v", err)
+	}
+
+	output := buffer.String()
+	if !strings.Contains(output, "Capture Failures:\n     - line 3: capture \"test_id\": \"json.data.id\" not found") {
+		t.Fatalf("expected capture failure section, got %q", output)
+	}
+	if !strings.Contains(output, "Response Body:\n     {\"data\":{}}") {
+		t.Fatalf("expected response body for capture failure, got %q", output)
 	}
 }

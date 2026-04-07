@@ -265,6 +265,8 @@ func isRequestDirective(trimmed string) bool {
 		return true
 	case content == "@no-cookie-jar", strings.HasPrefix(content, "@no-cookie-jar "):
 		return true
+	case strings.HasPrefix(content, "@capture "):
+		return true
 	case strings.HasPrefix(content, "@assert "):
 		return true
 	default:
@@ -316,6 +318,14 @@ func parseRequestDirective(trimmed string, request *ast.RequestBlock, lineNumber
 	case content == "@no-cookie-jar", strings.HasPrefix(content, "@no-cookie-jar "):
 		request.NoCookieJar = true
 		return applyDirectiveRemainder(request, strings.TrimSpace(strings.TrimPrefix(content, "@no-cookie-jar")), lineNumber)
+	case strings.HasPrefix(content, "@capture "):
+		capture, err := parseCapture(strings.TrimSpace(strings.TrimPrefix(content, "@capture")))
+		if err != nil {
+			return nil, fmt.Errorf("%d: invalid @capture: %w", lineNumber, err)
+		}
+		capture.Pos = ast.Position{Line: lineNumber, Column: 1}
+		request.Captures = append(request.Captures, capture)
+		return request, nil
 	case strings.HasPrefix(content, "@assert "):
 		assertion, err := parseAssertion(strings.TrimSpace(strings.TrimPrefix(content, "@assert")))
 		if err != nil {
@@ -484,6 +494,46 @@ func parseAssertion(spec string) (ast.Assertion, error) {
 		return ast.Assertion{}, err
 	}
 	return assertion, nil
+}
+
+func parseCapture(spec string) (ast.Capture, error) {
+	idx := strings.Index(spec, "=")
+	if idx < 0 {
+		return ast.Capture{}, fmt.Errorf("expected target = source")
+	}
+
+	name := strings.TrimSpace(spec[:idx])
+	source := strings.TrimSpace(spec[idx+1:])
+	if name == "" {
+		return ast.Capture{}, fmt.Errorf("target variable cannot be empty")
+	}
+	if strings.ContainsAny(name, " \t") {
+		return ast.Capture{}, fmt.Errorf("target variable cannot contain whitespace")
+	}
+	if source == "" {
+		return ast.Capture{}, fmt.Errorf("capture source cannot be empty")
+	}
+
+	switch {
+	case source == "status":
+		return ast.Capture{Name: name, Subject: ast.CaptureSubjectStatus}, nil
+	case source == "body":
+		return ast.Capture{Name: name, Subject: ast.CaptureSubjectBody}, nil
+	case strings.HasPrefix(source, "json."):
+		path := strings.TrimSpace(strings.TrimPrefix(source, "json."))
+		if err := validateJSONPath(path); err != nil {
+			return ast.Capture{}, err
+		}
+		return ast.Capture{Name: name, Subject: ast.CaptureSubjectJSON, Path: path}, nil
+	case strings.HasPrefix(source, "header."):
+		headerName := strings.TrimSpace(strings.TrimPrefix(source, "header."))
+		if headerName == "" {
+			return ast.Capture{}, fmt.Errorf("header name cannot be empty")
+		}
+		return ast.Capture{Name: name, Subject: ast.CaptureSubjectHeader, Path: headerName}, nil
+	default:
+		return ast.Capture{}, fmt.Errorf("unsupported capture source %q", source)
+	}
 }
 
 func splitAssertionExpression(spec string) (string, ast.AssertionOperator, string, bool, error) {

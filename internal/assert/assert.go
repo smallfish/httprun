@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/smallfish/httprun/internal/ast"
+	"github.com/smallfish/httprun/internal/jsonpath"
 )
 
 func Check(response *http.Response, body []byte, assertions []ast.Assertion) []string {
@@ -144,7 +145,7 @@ func checkJSONAssertion(decoded any, jsonErr error, assertion ast.Assertion) str
 		return fmt.Sprintf("line %d: expected JSON response body for %q", assertion.Pos.Line, formatSubject(assertion))
 	}
 
-	actual, found, err := lookupJSONPath(decoded, assertion.Path)
+	actual, found, err := jsonpath.Lookup(decoded, assertion.Path)
 	switch assertion.Operator {
 	case ast.AssertOpExists:
 		if err != nil {
@@ -198,32 +199,6 @@ func checkJSONAssertion(decoded any, jsonErr error, assertion ast.Assertion) str
 	default:
 		return fmt.Sprintf("line %d: unsupported json operator %q", assertion.Pos.Line, assertion.Operator)
 	}
-}
-
-func lookupJSONPath(value any, path string) (any, bool, error) {
-	current := value
-	for _, part := range strings.Split(path, ".") {
-		switch typed := current.(type) {
-		case map[string]any:
-			next, ok := typed[part]
-			if !ok {
-				return nil, false, nil
-			}
-			current = next
-		case []any:
-			index, err := strconv.Atoi(part)
-			if err != nil {
-				return nil, false, fmt.Errorf("json path %q requires numeric index at %q", path, part)
-			}
-			if index < 0 || index >= len(typed) {
-				return nil, false, nil
-			}
-			current = typed[index]
-		default:
-			return nil, false, nil
-		}
-	}
-	return current, true, nil
 }
 
 func compareInts(actual, expected int, operator ast.AssertionOperator) bool {

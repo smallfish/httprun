@@ -1,0 +1,17 @@
+@base = https://httpbin.org
+
+###
+# @name createAnything
+# @capture resourceId = json.json.id
+# @capture resourceName = json.json.name
+POST {{base}}/anything/resources
+Content-Type: application/json
+
+{"id":"demo-123","name":"captured"}
+
+###
+# @name readAnything
+# @assert status == 200
+# @assert body contains demo-123
+GET {{base}}/anything/resources/{{resourceId}}
+X-Resource-Name: {{resourceName}}

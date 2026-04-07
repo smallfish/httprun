@@ -25,6 +25,22 @@ type Header struct {
 	Pos   Position
 }
 
+type CaptureSubject string
+
+const (
+	CaptureSubjectStatus CaptureSubject = "status"
+	CaptureSubjectBody   CaptureSubject = "body"
+	CaptureSubjectJSON   CaptureSubject = "json"
+	CaptureSubjectHeader CaptureSubject = "header"
+)
+
+type Capture struct {
+	Name    string
+	Subject CaptureSubject
+	Path    string
+	Pos     Position
+}
+
 type AssertionSubject string
 
 const (
@@ -62,6 +78,7 @@ type RequestBlock struct {
 	Method            string
 	URL               string
 	Headers           []Header
+	Captures          []Capture
 	Assertions        []Assertion
 	Body              string
 	BodyFile          string

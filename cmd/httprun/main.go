@@ -109,7 +109,8 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 
 		var httpErr app.HTTPStatusError
 		var assertionErr app.AssertionError
-		if errors.As(result.err, &httpErr) || errors.As(result.err, &assertionErr) {
+		var captureErr app.CaptureError
+		if errors.As(result.err, &httpErr) || errors.As(result.err, &assertionErr) || errors.As(result.err, &captureErr) {
 			exitCode = 1
 		} else {
 			fmt.Fprintln(stderr, result.err)

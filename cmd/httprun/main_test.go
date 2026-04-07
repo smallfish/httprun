@@ -410,6 +410,49 @@ GET {{base}}/second
 	}
 }
 
+func TestRealMainRunCaptureFailureDoesNotRepeatOnStderr(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"data":{}}`))
+	}))
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	path := writeHTTPFile(t, tempDir, "capture.http", strings.TrimSpace(`
+###
+# @name create
+# @capture test_id = json.data.id
+POST {{base}}/resources
+
+###
+# @name next
+GET {{base}}/resources/{{test_id}}
+`))
+
+	var stdout, stderr bytes.Buffer
+	code := realMain([]string{
+		"run",
+		"--var", "base=" + server.URL,
+		path,
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr for capture failure, got %q", stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Capture Failures:") {
+		t.Fatalf("expected capture failures in output, got %q", output)
+	}
+	if !strings.Contains(output, "Summary: 1/2 executed, 0 passed, 1 failed, 1 skipped") {
+		t.Fatalf("expected skipped summary, got %q", output)
+	}
+}
+
 func writeHTTPFile(t *testing.T, dir, name, body string) string {
 	t.Helper()
 
