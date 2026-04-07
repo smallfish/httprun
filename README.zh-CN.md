@@ -135,6 +135,12 @@ GET {{base}}/users
 Authorization: Bearer {{token}}
 ```
 
+说明：
+
+- 文件变量使用 `@key = value`。
+- `# @name`、`# @assert`、`# @timeout` 这类请求元数据，只有写在注释指令里才会被识别，不会和变量声明冲突。
+- `@name = foo` 这种写法仍然会被当成普通变量声明，但不建议复用和指令相似的名字，否则可读性会变差。
+
 ### 环境变量文件
 
 `httprun` 会在 `.http` 文件同目录查找：
@@ -195,6 +201,13 @@ Content-Type: application/json
 
 Body 文件路径相对于 `.http` 文件所在目录解析，文件内容中的变量也会继续替换。
 
+### 放置规则
+
+- 文件变量、请求名、请求指令、断言都应该写在请求行之前。
+- Header 写在请求行之后、首个空行之前。
+- 首个空行之后开始进入请求 body。
+- body 之后再写的内容都会被当成 body 内容，而不是请求元数据。
+
 ## 请求指令
 
 请求指令是请求行之前的注释行。
@@ -228,7 +241,7 @@ GET {{base}}/slow
 ```http
 ###
 # @assert status == 200
-# @assert body contains "\"ok\": true"
+# @assert body contains hello
 # @assert json.data.user.name == "demo"
 # @assert header.Content-Type contains "application/json"
 GET {{base}}/profile

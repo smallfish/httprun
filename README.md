@@ -135,6 +135,12 @@ GET {{base}}/users
 Authorization: Bearer {{token}}
 ```
 
+Notes:
+
+- File variables use `@key = value`.
+- Request metadata such as `# @name`, `# @assert`, and `# @timeout` is recognized only in comment directives, not in variable declarations.
+- `@name = foo` is still a normal variable declaration, but reusing directive-like names is not recommended because it makes files harder to read.
+
 ### Environment files
 
 `httprun` looks in the same directory as the `.http` file for:
@@ -195,6 +201,13 @@ Content-Type: application/json
 
 The body file path is resolved relative to the `.http` file directory. Variable interpolation also applies inside the loaded file content.
 
+### Placement rules
+
+- File variables, request names, request directives, and assertions all belong before the request line.
+- Headers belong after the request line and before the first blank line.
+- The request body starts after the first blank line.
+- Anything written after the body is treated as body content, not as request metadata.
+
 ## Request Directives
 
 Directives are comment lines before the request line.
@@ -228,7 +241,7 @@ Assertions are comment directives before the request line.
 ```http
 ###
 # @assert status == 200
-# @assert body contains "\"ok\": true"
+# @assert body contains hello
 # @assert json.data.user.name == "demo"
 # @assert header.Content-Type contains "application/json"
 GET {{base}}/profile
